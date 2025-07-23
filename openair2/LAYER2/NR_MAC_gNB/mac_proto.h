@@ -190,13 +190,7 @@ void nr_csi_meas_reporting(int Mod_idP, frame_t frameP, slot_t slotP);
 
 void nr_measgap_scheduling(gNB_MAC_INST *nr_mac, frame_t frame, sub_frame_t slot);
 
-int nr_acknack_scheduling(gNB_MAC_INST *mac,
-                          NR_UE_info_t *UE,
-                          frame_t frameP,
-                          slot_t slotP,
-                          int beam_index,
-                          int r_pucch,
-                          int do_common);
+int nr_acknack_scheduling(gNB_MAC_INST *mac, NR_UE_info_t *UE, frame_t frame, slot_t slot, int ue_beam, int r_pucch, int is_common);
 
 int get_pdsch_to_harq_feedback(NR_PUCCH_Config_t *pucch_Config,
                                nr_dci_format_t dci_format,
