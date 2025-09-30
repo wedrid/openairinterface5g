@@ -405,7 +405,12 @@ int main(int argc, char **argv)
   printf("Creating %d test UEs...\n", num_ues);
   for (int u = 0; u < num_ues; u++) {
     rnti_t rnti = 0x1234 + u;
-    NR_CellGroupConfig_t *cg = get_default_secondaryCellGroup(scc, NULL, 0, 1, &conf, u, 0);
+    NR_UE_UL_RRC_info_t sr_info = {.allocated = true,
+                                   .resource = 0,
+                                   .offset = get_ul_slot_offset(&frame_structure, 0, true),
+                                   .period = frame_structure.numb_slots_period};
+    NR_UE_UL_RRC_info_t csimeas_info = sr_info;
+    NR_CellGroupConfig_t *cg = get_default_secondaryCellGroup(scc, NULL, sr_info, csimeas_info, 0, 1, &conf, u, 0);
     cg->spCellConfig->reconfigurationWithSync = get_reconfiguration_with_sync(rnti, u, scc, 0);
 
     /* Add DRB 1 to CellGroup so nr_mac_add_test_ue registers LCID 4. Default is

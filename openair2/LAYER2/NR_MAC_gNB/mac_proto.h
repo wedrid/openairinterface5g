@@ -28,7 +28,7 @@ int get_dl_slots_per_period(const frame_structure_t *fs);
 int get_full_ul_slots_per_period(const frame_structure_t *fs);
 int get_full_dl_slots_per_period(const frame_structure_t *fs);
 int get_ul_slot_offset(const frame_structure_t *fs, int idx, bool count_mixed);
-void delete_nr_ue_data(NR_UE_info_t *UE, uid_allocator_t *uia);
+void delete_nr_ue_data(NR_UE_info_t *UE, gNB_MAC_INST *nrmac, uid_allocator_t *uia);
 
 void mac_top_init_gNB(ngran_node_t node_type,
                       NR_ServingCellConfigCommon_t *scc,
@@ -537,8 +537,9 @@ bool nr_mac_ue_is_active(const NR_UE_info_t *ue);
 void nr_mac_trigger_ul_failure(NR_UE_sched_ctrl_t *sched_ctrl, NR_SubcarrierSpacing_t subcarrier_spacing);
 void nr_mac_reset_ul_failure(NR_UE_sched_ctrl_t *sched_ctrl);
 bool nr_mac_check_ul_failure(gNB_MAC_INST *nrmac, int rnti, NR_UE_sched_ctrl_t *sched_ctrl);
-
-void nr_mac_trigger_reconfiguration(const gNB_MAC_INST *nrmac, NR_UE_info_t *UE, int new_bwp_id, int new_beam);
+void config_ul_rrc_info(gNB_MAC_INST *nrmac, const nr_mac_config_t *config, int scs, int bw);
+void nr_mac_trigger_reconfiguration(gNB_MAC_INST *nrmac, NR_UE_info_t *UE, int new_bwp_id, int new_beam);
+bool mac_ul_rrc_periodic_resources(gNB_MAC_INST *mac, NR_UE_info_t *UE, const NR_ServingCellConfigCommon_t *scc, int active_bwp);
 
 bool nr_mac_add_lcid(NR_UE_sched_ctrl_t *sched_ctrl, const nr_lc_config_t *c);
 nr_lc_config_t *nr_mac_get_lc_config(NR_UE_sched_ctrl_t* sched_ctrl, int lcid);
