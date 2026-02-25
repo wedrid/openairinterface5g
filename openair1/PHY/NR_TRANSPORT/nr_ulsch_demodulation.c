@@ -817,9 +817,10 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
   else
     joint_pv->log2_maxh = (log2_approx(avgs) >> 1) + 1 + log2_approx(num_sp_streams >> 1);
 
-  if (joint_pv->log2_maxh < 0)
-    joint_pv->log2_maxh = 0;
-
+  if (joint_pv->log2_maxh < 1)
+    joint_pv->log2_maxh = 1;
+  else if (joint_pv->log2_maxh > 14)
+    joint_pv->log2_maxh = 14;
   stop_meas(&gNB->rx_pusch_init_stats);
 
   start_meas(&gNB->rx_pusch_symbol_processing_stats);
