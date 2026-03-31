@@ -218,7 +218,7 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
     uint8_t ULSCH_id = ULSCH_ids[pusch_id];
     NR_gNB_ULSCH_t *ulsch = &phy_vars_gNB->ulsch[ULSCH_id];
     NR_UL_gNB_HARQ_t *harq_process = ulsch->harq_process;
-    short *ulsch_llr = phy_vars_gNB->pusch_vars[ULSCH_id].llr;
+    short *ulsch_llr = phy_vars_gNB->pusch_vars[ULSCH_id].ulsch_llrs;
 
     if (!ulsch_llr) {
       LOG_E(PHY, "ulsch_decoding.c: NULL ulsch_llr pointer\n");

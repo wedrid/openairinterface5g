@@ -246,9 +246,11 @@ typedef struct {
   uint32_t ulsch_noise_power[8];
   /// total noise over antennas
   uint32_t ulsch_noise_power_tot;
-  /// \brief llr values.
-  /// - first index: ? [0..1179743] (hard coded)
-  int16_t *llr;
+  /// \brief llr values for PUSCH and UCI
+  int16_t *ulsch_llrs;
+  int16_t *ack_llrs;
+  int16_t *csi1_llrs;
+  int16_t *csi2_llrs;
   // PTRS symbol index, to be updated every PTRS symbol within a slot.
   uint8_t ptrs_symbol_index;
   /// bit mask of PT-RS ofdm symbol indicies
