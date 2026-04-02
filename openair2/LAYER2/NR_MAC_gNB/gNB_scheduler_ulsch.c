@@ -2799,8 +2799,8 @@ void nr_ulsch_preprocessor(gNB_MAC_INST *nr_mac, post_process_pusch_t *pp_pusch)
     int k2 = fsn_get_diff(*next, current) - koffset;
     DevAssert(k2 > 0);
     int slots_per_frame = nr_mac->frame_structure.numb_slots_frame;
-    int sched_frame = (frame + (slot + k2 + koffset) / slots_per_frame) % MAX_FRAME_NUMBER;
-    int sched_slot = (slot + k2 + koffset) % slots_per_frame;
+    int sched_frame = get_fb_frame(frame, slot, k2, slots_per_frame, koffset);
+    int sched_slot = get_fb_slot(slot, k2, slots_per_frame, koffset);
 
     /* Check that at least one TDA can reach this slot, if not, no future slot is reachable either */
     {
