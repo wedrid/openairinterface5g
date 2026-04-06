@@ -103,7 +103,8 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
     NR_gNB_PUSCH *pusch = &phy_vars_gNB->pusch_vars[ULSCH_id];
     NR_UL_gNB_HARQ_t *harq_process = ulsch->harq_process;
     const nfapi_nr_pusch_pdu_t *pusch_pdu = &harq_process->ulsch_pdu;
-
+    if (!(pusch_pdu->pdu_bit_map & PUSCH_PDU_BITMAP_PUSCH_DATA))
+      continue;
     nrLDPC_TB_decoding_parameters_t *TB_parameters = &TBs[pusch_id];
 
     if (!harq_process) {
