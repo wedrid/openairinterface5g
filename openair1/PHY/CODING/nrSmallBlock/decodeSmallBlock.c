@@ -14,8 +14,50 @@
 
 //#define DEBUG_DECODESMALLBLOCK
 
-//input = [d̂_0] [d̂_1] [d̂_2] ... [d̂_31]
-//output = [? ... ? ĉ_K-1 ... ĉ_2 ĉ_1 ĉ_0]
+// Decode 1 or 2 UCI bits using soft LLR combining
+uint16_t decode_1_2_uci_bit(int8_t *input, int n_bits, int Qm)
+{
+  if (n_bits == 1) {
+    // Table 5.3.3.1-1 of 38.212
+    // Each modulation symbol carries 1 info bit (c0) at n=0
+    // all the rest are placeholders
+    // we can exploit y placeholders since in that case b(i) = b(i − 1)
+    // [c0 y x ...]
+    int decision_metric = input[0] + (Qm > 1 ? input[1] : 0);
+    // TODO use x placeholder bits stands for b(i) = 1 to increase reliability
+    return decision_metric < 0;
+  } else {
+    AssertFatal(n_bits == 2, "Invalid number of bits %d. It should be 1 or 2!\n", n_bits);
+    // Table 5.3.3.1-2 of 38.212
+    // c2 = (c0 + c1 ) % 2
+    int c0 = input[0], c1 = input[1];
+    int  c2 = Qm == 1 ? input[2] : input[Qm];
+    if (Qm > 1) {
+      c0 += input[Qm + 1];
+      c1 += input[Qm * 2];
+      c2 += input[Qm * 2 + 1];
+    }
+    // Positive LLR means bit '0', Negative LLR means bit '1'
+    int32_t score00 =  c0 + c1 + c2; // c0=0, c1=0 -> c2=0
+    int32_t score10 =  c0 - c1 - c2; // c0=0, c1=1 -> c2=1
+    int32_t score01 = -c0 + c1 - c2; // c0=1, c1=0 -> c2=1
+    int32_t score11 = -c0 - c1 + c2; // c0=1, c1=1 -> c2=0
+    int32_t maxscore = score00;
+    uint16_t result = 0; // 00
+    if (score01 > maxscore) {
+      result = 1; // 01
+      maxscore = score01;
+    }
+    if (score10 > maxscore) {
+      result = 2; // 10
+      maxscore = score10;
+    }
+    if (score11 > maxscore)
+      result = 3; // 11
+    // TODO use x placeholder bits stands for b(i) = 1 to increase reliability
+    return result;
+  }
+}
 
 uint16_t decodeSmallBlock(int8_t *in, uint8_t len)
 {
