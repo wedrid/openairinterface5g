@@ -18,6 +18,9 @@
 #include "SCHED_NR_UE/harq_nr.h"
 #include "nr-uesoftmodem.h"
 #include "common/config/config_userapi.h"
+#ifdef LDPC_CUDA
+#include <cuda_runtime.h>
+#endif
 
 void RCconfig_nrUE_prs(void *cfg)
 {
@@ -329,7 +332,11 @@ void free_nr_ue_dl_harq(NR_DL_UE_HARQ_t harq_list[2][NR_MAX_HARQ_PROCESSES], int
 
   for (int j=0; j < 2; j++) {
     for (int i = 0; i < number_of_processes; i++) {
+#ifdef LDPC_CUDA
+      cudaFreeHost(harq_list[j][i].c);
+#else
       free_and_zero(harq_list[j][i].c);
+#endif
       free_and_zero(harq_list[j][i].d);
     }
   }
@@ -347,12 +354,20 @@ void free_nr_ue_ul_harq(NR_UL_UE_HARQ_t harq_list[NR_MAX_HARQ_PROCESSES], int nu
 
   for (int i = 0; i < number_of_processes; i++) {
     free_and_zero(harq_list[i].payload_AB);
+#ifdef LDPC_CUDA
+    {
+      // nr_init_ul_harq_processes() makes single allocation(!)
+      cudaFreeHost(harq_list[i].c[0]);
+      cudaFreeHost(harq_list[i].d[0]);
+    }
+#else
     for (int r = 0; r < a_segments; r++) {
       free_and_zero(harq_list[i].c[r]);
       free_and_zero(harq_list[i].d[r]);
     }
     free_and_zero(harq_list[i].c);
     free_and_zero(harq_list[i].d);
+#endif
     free_and_zero(harq_list[i].e);
     free_and_zero(harq_list[i].f);
   }
@@ -367,8 +382,14 @@ void free_nr_ue_pdsch_buffers(pdsch_scratch_t *buffers, int num_actors)
     free_and_zero(buffers[i].dl_ch_magr);
     free_and_zero(buffers[i].rho_dl);
     free_and_zero(buffers[i].pdsch_dl_ch_estimates);
-    for (int c = 0; c < 2; c++)
+    for (int c = 0; c < 2; c++) {
+#ifdef LDPC_CUDA
+      cudaFreeHost(buffers[i].llr[c]);
+      cudaFreeHost(buffers[i].llr_dev[c]);
+#else
       free_and_zero(buffers[i].llr[c]);
+#endif
+    }
   }
 }
 
@@ -395,7 +416,14 @@ void nr_init_dl_harq_processes(NR_DL_UE_HARQ_t harq_list[2][NR_MAX_HARQ_PROCESSE
       memset(harq_list[j] + i, 0, sizeof(NR_DL_UE_HARQ_t));
       init_downlink_harq_status(harq_list[j] + i);
 
+#ifdef LDPC_CUDA
+      cudaError_t err = cudaHostAlloc((void **)&harq_list[j][i].c, a_segments * sizeof(uint8_t *) * 1056, cudaHostAllocMapped);
+      AssertFatal(err == cudaSuccess, "CUDA Error (harq.c): %s\n", cudaGetErrorString(err));
+      err = cudaHostGetDevicePointer((void **)&harq_list[j][i].cdev, (void *)harq_list[j][i].c, 0);
+      AssertFatal(err == cudaSuccess, "CUDA Error (harq.cdev): %s\n", cudaGetErrorString(err));
+#else
       harq_list[j][i].c = malloc16(a_segments * sizeof(*harq_list[j][i].c) * 1056);
+#endif
       harq_list[j][i].d = malloc16(a_segments * sizeof(*harq_list[j][i].d) * 3 * 8448);
       init_abort(&harq_list[j][i].abort_decode);
       harq_list[j][i].status  = 0;
@@ -410,40 +438,50 @@ void nr_init_ul_harq_processes(NR_UL_UE_HARQ_t harq_list[NR_MAX_HARQ_PROCESSES],
   uint16_t a_segments = MAX_NUM_NR_ULSCH_SEGMENTS_PER_LAYER*max_layers;  //number of segments to be allocated
 
   if (num_rb != 273) {
-    a_segments = a_segments*num_rb;
-    a_segments = a_segments/273 +1;
+    a_segments = a_segments * num_rb;
+    a_segments = a_segments / 273 + 1;
   }
 
-  uint32_t ulsch_bytes = a_segments*1056;  // allocated bytes per segment
+  uint32_t ulsch_bytes = a_segments * 1056;
 
   for (int i = 0; i < number_of_processes; i++) {
+    memset(&harq_list[i], 0, sizeof(NR_UL_UE_HARQ_t));
 
-    memset(harq_list + i, 0, sizeof(NR_UL_UE_HARQ_t));
+    harq_list[i].payload_AB = malloc16_clear(ulsch_bytes);
 
-    harq_list[i].payload_AB = malloc16(ulsch_bytes);
-    DevAssert(harq_list[i].payload_AB);
-    bzero(harq_list[i].payload_AB, ulsch_bytes);
+#ifdef LDPC_CUDA
+    uint8_t *tmp_c, *tmp_d;
+    size_t total_c_size = a_segments * 8448;
+    size_t total_d_size = a_segments * 68 * 384 * sizeof(uint32_t);
 
-    harq_list[i].c = malloc16(a_segments*sizeof(uint8_t *));
-    harq_list[i].d = malloc16(a_segments*sizeof(uint16_t *));
+    AssertFatal(cudaHostAlloc((void **)&tmp_c, total_c_size, cudaHostAllocMapped) == cudaSuccess, "CUDA Data Alloc c failed\n");
+    AssertFatal(cudaHostAlloc((void **)&tmp_d, total_d_size, cudaHostAllocMapped) == cudaSuccess, "CUDA Data Alloc d failed\n");
+    memset(tmp_c, 0, total_c_size);
+    memset(tmp_d, 0, total_d_size);
+
+    AssertFatal(cudaHostAlloc((void **)&harq_list[i].c, a_segments * sizeof(uint8_t *), cudaHostAllocMapped) == cudaSuccess,
+                "CUDA Pointer Alloc c failed\n");
+    AssertFatal(cudaHostAlloc((void **)&harq_list[i].d, a_segments * sizeof(uint8_t *), cudaHostAllocMapped) == cudaSuccess,
+                "CUDA Pointer Alloc d failed\n");
+
     for (int r = 0; r < a_segments; r++) {
-      harq_list[i].c[r] = malloc16(8448);
-      DevAssert(harq_list[i].c[r]);
-      bzero(harq_list[i].c[r],8448);
-
-      harq_list[i].d[r] = malloc16(68*384); //max size for coded output
-      DevAssert(harq_list[i].d[r]);
-      bzero(harq_list[i].d[r],(68*384));
+      harq_list[i].c[r] = tmp_c + (r * 8448);
+      harq_list[i].d[r] = (uint8_t *)(tmp_d + (r * 68 * 384 * sizeof(uint32_t)));
     }
 
-    harq_list[i].e = malloc16(14*num_rb*12*16);
-    DevAssert(harq_list[i].e);
-    bzero(harq_list[i].e,14*num_rb*12*16);
+#else
+    harq_list[i].c = malloc16(a_segments * sizeof(uint8_t *));
+    harq_list[i].d = malloc16(a_segments * sizeof(uint8_t *));
 
-    harq_list[i].f = malloc16(14*num_rb*12*16);
-    DevAssert(harq_list[i].f);
-    bzero(harq_list[i].f,14*num_rb*12*16);
+    for (int r = 0; r < a_segments; r++) {
+      harq_list[i].c[r] = malloc16_clear(8448);
+      harq_list[i].d[r] = malloc16_clear(68 * 384);
+    }
+#endif
 
+    uint32_t ef_size = 14 * num_rb * 12 * 16;
+    harq_list[i].e = malloc16_clear(ef_size);
+    harq_list[i].f = malloc16_clear(ef_size);
     harq_list[i].round = 0;
   }
 }
@@ -466,8 +504,16 @@ void nr_init_pdsch_buffers(pdsch_scratch_t *buffers, int num_actors, const NR_DL
     buffers[i].dl_ch_magr            = malloc16_clear(comp_elems   * sizeof(c16_t));
     buffers[i].rho_dl                = malloc16_clear(rho_elems    * sizeof(c16_t));
     buffers[i].pdsch_dl_ch_estimates = malloc16_clear(ch_est_elems * sizeof(int32_t));
-    for (int c = 0; c < 2; c++)
+    for (int c = 0; c < 2; c++) {
+#ifdef LDPC_CUDA
+      cudaError_t err = cudaHostAlloc((void **)&buffers[i].llr[c], (66 * 3 * 8448) * sizeof(int16_t), cudaHostAllocMapped);
+      AssertFatal(err == cudaSuccess, "CUDA Error (pusch_llr): %s\n", cudaGetErrorString(err));
+      err = cudaHostGetDevicePointer((void **)&buffers[i].llr_dev[c], buffers[i].llr[c], 0);
+      AssertFatal(err == cudaSuccess, "CUDA Error (pusch_llr_dev): %s\n", cudaGetErrorString(err));
+#else
       buffers[i].llr[c]              = malloc16(llr_buf_max * sizeof(int16_t));
+#endif
+    }
   }
 }
 

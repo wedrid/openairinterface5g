@@ -26,6 +26,10 @@
 #include <string.h>
 #include "nfapi/open-nFAPI/fapi/inc/nr_fapi_p5_utils.h"
 
+#ifdef LDPC_CUDA
+#include <cuda_runtime.h>
+#endif
+
 static void init_DLSCH_struct(PHY_VARS_gNB *gNB);
 static void destroy_DLSCH_struct(const PHY_VARS_gNB *gNB);
 
@@ -185,8 +189,16 @@ void phy_init_nr_gNB(PHY_VARS_gNB *gNB)
     for (int i = 0; i < max_ul_mimo_layers; i++) {
       pusch->rxdataF_comp[i] = (c16_t *)malloc16_clear(sizeof(**pusch->rxdataF_comp) * nb_re_pusch2 * fp->symbols_per_slot);
     }
-    pusch->llr = (int16_t *)malloc16_clear((8 * ((3 * 8 * 6144) + 12))
-                                           * sizeof(int16_t)); // [hna] 6144 is LTE and (8*((3*8*6144)+12)) is not clear
+#ifdef LDPC_CUDA
+    cudaError_t err = cudaHostAlloc((void **)&pusch->llr,
+                                    (144 * 3 * 8448) * sizeof(int16_t),
+                                    cudaHostAllocMapped); // 144 segments 8448*3 coded bits per segment
+    AssertFatal(err == cudaSuccess, "CUDA Error (pusch_llr): %s\n", cudaGetErrorString(err));
+    err = cudaHostGetDevicePointer((void **)&pusch->llr_dev, pusch->llr, 0);
+    AssertFatal(err == cudaSuccess, "CUDA Error (harq_f_dev): %s\n", cudaGetErrorString(err));
+#else
+    pusch->llr = (int16_t *)malloc16_clear((144 * 3 * 8448) * sizeof(int16_t)); // 144 segments 3*8448 coded bits per segment
+#endif
     pusch->ul_valid_re_per_slot = (int16_t *)malloc16_clear(sizeof(int16_t) * fp->symbols_per_slot);
   } // ulsch_id
 }
@@ -241,7 +253,11 @@ void phy_free_nr_gNB(PHY_VARS_gNB *gNB)
     free_and_zero(pusch_vars->ul_valid_re_per_slot);
     free_and_zero(pusch_vars->rxdataF_comp);
 
+#ifdef LDPC_CUDA
+    cudaFreeHost(pusch_vars->llr_dev);
+#else
     free_and_zero(pusch_vars->llr);
+#endif
   } // ULSCH_id
   free(gNB->pusch_vars);
 
