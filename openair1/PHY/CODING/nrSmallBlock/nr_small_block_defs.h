@@ -14,7 +14,7 @@
 #define NR_SMALL_BLOCK_CODED_BITS 32
 
 
-uint32_t encodeSmallBlock(int in, int len);
+uint32_t encodeSmallBlock(uint32_t in, int len, int Qm);
 
 uint16_t decodeSmallBlock(int8_t *in, uint8_t len);
 

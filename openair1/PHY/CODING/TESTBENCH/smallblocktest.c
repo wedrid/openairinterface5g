@@ -107,7 +107,7 @@ int main(int argc, char *argv[])
       testInput |= (((uint32_t)(rand() % 2)) & 1);
       // Encoding
       start_meas(&timeEncoder);
-      encoderOutput = encodeSmallBlock(testInput, messageLength);
+      encoderOutput = encodeSmallBlock(testInput, messageLength, 0);
       stop_meas(&timeEncoder);
 
       for (int i = 0; i < NR_SMALL_BLOCK_CODED_BITS; i++) {
