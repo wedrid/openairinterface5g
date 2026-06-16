@@ -143,6 +143,8 @@ add_physim_test(physim.5g.smallblocktest.test1 "3 bits" smallblocktest -l 3 -s -
 add_physim_test(physim.5g.smallblocktest.test2 "6 bits" smallblocktest -l 6 -s -4 -d 1 -i 10000)
 add_physim_test(physim.5g.smallblocktest.test3 "7 bits" smallblocktest -l 7 -s -4 -d 1 -i 10000)
 add_physim_test(physim.5g.smallblocktest.test4 "11 bits" smallblocktest -l 11 -s -4 -d 1 -i 10000)
+add_physim_test(physim.5g.smallblocktest.test5 "2 bits" smallblocktest -l 2 -s -4 -f 7 -d 1 -i 10000)
+add_physim_test(physim.5g.smallblocktest.test6 "1 bit Qm 6" smallblocktest -l 1 -s -4 -f 10 -d 1 -q 6 -i 10000)
 
 ####################################################################################
 ######                           nr_ulschsim unit test                        ######
