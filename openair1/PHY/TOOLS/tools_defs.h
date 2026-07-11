@@ -59,7 +59,7 @@ extern "C" {
     int dim2;
     int dim3;
     int dim4;
-    uint8_t data[] __attribute__((aligned(32)));
+    uint8_t data[] __attribute__((aligned(64)));
   } fourDimArray_t;
 
   static inline fourDimArray_t *allocateFourDimArray(int elmtSz, int dim1, int dim2, int dim3, int dim4)

@@ -771,7 +771,7 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
   const int nl = dlsch->cw_info.Nl;
   const int matrixSz = nbRx * nl;
   const uint32_t rx_size_symbol = (freq_alloc->num_rbs * NR_NB_SC_PER_RB + 15) & ~15;
-  __attribute__((aligned(32))) int32_t dl_ch_estimates_ext[matrixSz][rx_size_symbol];
+  __attribute__((aligned(64))) int32_t dl_ch_estimates_ext[matrixSz][rx_size_symbol];
 
   // Use ML-based LLR for 2-layer MIMO with QPSK/16QAM/64QAM (nl==2, qamModOrder<=6).
   // Controlled by ue->do_ml (set via -E flag in dlsim, or ue->do_ml in the UE struct).
@@ -819,7 +819,7 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
   int nb_rb_pdsch = freq_alloc->num_rbs;
 
   start_meas_nr_ue_phy(ue, DLSCH_EXTRACT_RBS_STATS);
-  __attribute__((aligned(32))) c16_t rxdataF_ext[nbRx][rx_size_symbol];
+  __attribute__((aligned(64))) c16_t rxdataF_ext[nbRx][rx_size_symbol];
   memset(rxdataF_ext, 0, sizeof(rxdataF_ext));
 
   uint32_t csi_res_bitmap = build_csi_overlap_bitmap(dlsch_config, symbol);
@@ -1103,7 +1103,7 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
     int max_symb_re = 0;
     GET_ARRAY_MAX(dl_valid_re, NR_SYMBOLS_PER_SLOT, max_symb_re);
     const int llr_per_symbol = max_symb_re * dlsch->cw_info.qamModOrder;
-    __attribute__((aligned(32))) int16_t layer_llr[NR_SYMBOLS_PER_SLOT][nl][llr_per_symbol];
+    __attribute__((aligned(64))) int16_t layer_llr[NR_SYMBOLS_PER_SLOT][nl][llr_per_symbol];
 
     // Generate LLR from PTRS compensated signal
     const uint8_t qamModOrder = dlsch->cw_info.qamModOrder;
