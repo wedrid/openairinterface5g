@@ -4,6 +4,7 @@
 
 #include "tools_defs.h"
 #include "PHY/impl_defs_top.h"
+#include "simde/x86/avx512.h"
 
 // Compute Energy of a complex signal vector, removing the DC component!
 // input  : points to vector
@@ -48,28 +49,46 @@ int32_t signal_energy(int32_t *input,uint32_t length)
 
 uint32_t signal_energy_nodc(const c16_t *input, uint32_t length)
 {
-  // init
-  simde__m128 mm0 = simde_mm_setzero_ps();
+  int i = 0;
+  float acc = 0;
 
-  // Acc
-  for (int32_t i = 0; i < (length >> 2); i++) {
-    simde__m128i in = simde_mm_loadu_si128((simde__m128i *)input);
-    mm0 = simde_mm_add_ps(mm0, simde_mm_cvtepi32_ps(simde_mm_madd_epi16(in, in)));
-    input += 4;
+#if defined(__AVX512F__) && defined(__AVX512BW__)
+  simde__m512 acc512 = {};
+  for (; i < (length & ~15); i += 16) {
+    const simde__m512i in = simde_mm512_loadu_si512((simde__m512i *)(input + i));
+    const simde__m512i tmp = simde_mm512_madd_epi16(in, in);
+    acc512 = simde_mm512_add_ps(acc512, simde_mm512_cvtepi32_ps(tmp));
   }
+  acc = simde_mm512_reduce_add_ps(acc512);
+#endif
+  // likely the number of samples is a multiple of 16
+  if (i != length) {
+    simde__m128 acc128 = {};
+#if defined(__x86_64__) || defined(__i386__)
+    if (__builtin_cpu_supports("avx2")) {
+      simde__m256 acc256 = {};
+      for (; i < (length & ~7); i += 8) {
+        const simde__m256i in = simde_mm256_loadu_si256((simde__m256i *)(input + i));
+        const simde__m256i tmp = simde_mm256_madd_epi16(in, in);
+        acc256 = simde_mm256_add_ps(acc256, simde_mm256_cvtepi32_ps(tmp));
+      }
+      acc128 = simde_mm_add_ps(simde_mm256_extractf128_ps(acc256, 1), simde_mm256_extractf128_ps(acc256, 0));
+    }
+#endif
+    for (; i < (length & ~3); i += 4) {
+      simde__m128i in = simde_mm_loadu_si128((simde__m128i *)(input + i));
+      acc128 = simde_mm_add_ps(acc128, simde_mm_cvtepi32_ps(simde_mm_madd_epi16(in, in)));
+    }
+    simde__m128 hi64 = simde_mm_movehl_ps(acc128, acc128);
+    simde__m128 sum2 = simde_mm_add_ps(acc128, hi64);
+    simde__m128 hi32 = simde_mm_shuffle_ps(sum2, sum2, 1);
+    simde__m128 sum1 = simde_mm_add_ss(sum2, hi32);
+    acc += simde_mm_cvtss_f32(sum1);
 
-  // leftover
-  float leftover_sum = 0;
-  c16_t *leftover_input = (c16_t *)input;
-  uint16_t lefover_count = length - ((length >> 2) << 2);
-  for (int32_t i = 0; i < lefover_count; i++) {
-    leftover_sum += leftover_input[i].r * leftover_input[i].r + leftover_input[i].i * leftover_input[i].i;
+    for (; i < length; i++)
+      acc += squaredMod(input[i]);
   }
-
-  // Ave
-  float sums[4];
-  simde_mm_store_ps(sums, mm0);
-  return (uint32_t)((sums[0] + sums[1] + sums[2] + sums[3] + leftover_sum) / (float)length);
+  return roundf(acc / (float)length);
 }
 
 double signal_energy_fp(double *s_re[2],double *s_im[2],uint32_t nb_antennas,uint32_t length,uint32_t offset)
