@@ -400,13 +400,10 @@ void nr_channel_level(const int symbol,
                       int32_t avg[nb_rx * Nl],
                       const uint32_t len)
 {
-  int16_t x = factor2(len);
-  int16_t y = len >> x;
   for (int aarx = 0; aarx < nb_rx; aarx++) {
     for (int l = 0; l < Nl; l++) {
-      simde__m128i *ch128 = (simde__m128i *)&ch_estimates_ext[l * nb_rx + aarx][symbol * len];
-      //compute average level
-      avg[l * nb_rx + aarx] = simde_mm_average(ch128, len, x, y);
+      // compute average squared module
+      avg[l * nb_rx + aarx] = signal_energy_nodc(ch_estimates_ext[l * nb_rx + aarx] + symbol * len, len);
       LOG_D(PHY, "Channel level: %d\n", avg[l * nb_rx + aarx]);
     }
   }
