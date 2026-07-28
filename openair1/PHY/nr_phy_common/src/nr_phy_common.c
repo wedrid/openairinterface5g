@@ -406,23 +406,6 @@ void nr_channel_level(const int symbol,
   }
 }
 
-void nr_scale_channel(int size, c16_t ch_estimates_ext[][size], int symb, uint32_t len, int nb_rx, int shift_ch_ext)
-{
-  for (int aarx = 0; aarx < nb_rx; aarx++) {
-    simde__m128i *ul_ch128 = (simde__m128i *)&ch_estimates_ext[aarx][symb * len];
-    int loop_end = len >> 2;
-    for (int i = 0; i < loop_end; i++) {
-      ul_ch128[i] = simde_mm_srai_epi16(ul_ch128[i], shift_ch_ext);
-    }
-    // loop for the remaining elements
-    int start_index = loop_end * 4;
-    for (int j = start_index; j < len; j++) {
-      c16_t *temp = ((c16_t *)ul_ch128) + j;
-      *temp = c16Shift(*temp, shift_ch_ext);
-    }
-  }
-}
-
 void nr_fo_compensation(double fo_Hz, int samples_per_ms, int sample_offset, const c16_t *rxdata_in, c16_t *rxdata_out, int size)
 {
   const double phase_inc = -fo_Hz / (samples_per_ms * 1000);

@@ -771,8 +771,8 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
   NR_DL_FRAME_PARMS *fp = &ue->frame_parms;
   const int nl = dlsch->cw_info.Nl;
   const int matrixSz = nbRx * nl;
-  const uint32_t rx_size_symbol = (freq_alloc->num_rbs * NR_NB_SC_PER_RB + 15) & ~15;
-  __attribute__((aligned(32))) c16_t dl_ch_estimates_ext[matrixSz][rx_size_symbol];
+  const uint32_t rx_size_symbol = ceil_mod(freq_alloc->num_rbs * NR_NB_SC_PER_RB, 16);
+  __attribute__((aligned(64))) c16_t dl_ch_estimates_ext[matrixSz][rx_size_symbol];
 
   // Use ML-based LLR for 2-layer MIMO with QPSK/16QAM/64QAM (nl==2, qamModOrder<=6).
   // Controlled by ue->do_ml (set via -E flag in dlsim, or ue->do_ml in the UE struct).
@@ -894,22 +894,6 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
     int copy_index = symbol - dlsch_config->start_symbol;
     UEscopeCopyUnsafe(ue, pdschRxdataF, rxdataF_ext[0], size, scope_req->scope_rxdataF_offset, copy_index);
     scope_req->scope_rxdataF_offset += size;
-  }
-  //----------------------------------------------------------
-  //--------------------- Channel Scaling --------------------
-  //----------------------------------------------------------
-  start_meas_nr_ue_phy(ue, DLSCH_CHANNEL_SCALE_STATS);
-  for (int i = 0; i < nl; i++)
-    nr_scale_channel(rx_size_symbol, chFext[i], 0, nb_re_pdsch, nbRx, 0);
-  stop_meas_nr_ue_phy(ue, DLSCH_CHANNEL_SCALE_STATS);
-  if (meas_enabled) {
-    LOG_D(PHY,
-          "[AbsSFN %u.%d] Slot%d Symbol %d: Channel Scale  %5.2f \n",
-          frame,
-          nr_slot_rx,
-          slot,
-          symbol,
-          ue->phy_cpu_stats.cpu_time_stats[DLSCH_CHANNEL_SCALE_STATS].p_time / (cpuf * 1000.0));
   }
 
   //----------------------------------------------------------

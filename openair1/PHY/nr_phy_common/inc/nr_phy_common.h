@@ -346,7 +346,6 @@ void nr_channel_level(const int symbol,
                       const int nb_rx,
                       int32_t avg[nb_rx],
                       const uint32_t len);
-void nr_scale_channel(int size, c16_t ch_estimates_ext[][size], int symb, uint32_t len, int nb_rx, int shift_ch_ext);
 bool generate_srs_nr(const NR_DL_FRAME_PARMS *frame_parms,
                      c16_t **txdataF,
                      uint16_t symbol_offset,

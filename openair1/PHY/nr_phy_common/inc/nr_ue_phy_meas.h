@@ -8,7 +8,7 @@
 #include "utils.h"
 
 #define NOOP(a) a
-#define FOREACH_NR_PHY_CPU_MEAS(FN) \
+#define FOREACH_NR_PHY_CPU_MEAS(FN)                                                                                                \
   FN(RX_PDSCH_STATS),\
   FN(DLSCH_RX_PDCCH_STATS),\
   FN(RX_FO_COMPENSATION_STATS),\

@@ -399,6 +399,7 @@ typedef struct puschSymbolProc_s {
   NR_gNB_PUSCH **pusch_vars_group;
   int16_t **scrambling_sequences;
   int *layer_offsets;
+  int layers_attenuation;
 } puschSymbolProc_t;
 
 static void nr_pusch_symbol_processing(void *arg)
@@ -429,7 +430,7 @@ static void nr_pusch_symbol_processing(void *arg)
              llrss,
              soffset,
              symbol,
-             pusch_vars->log2_maxh,
+             pusch_vars->log2_maxh + rdata->layers_attenuation,
              rdata->nvar,
              rdata->rxFext_slot_mem,
              rdata->pusch_ch_est_dmrs_interpl_slot_mem,
@@ -776,8 +777,8 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
     dmrs_symbol = get_valid_dmrs_idx_for_channel_est(rel15_ul_ref->ul_dmrs_symb_pos, meas_symbol);
   else // average of channel estimates stored in first symbol
     dmrs_symbol = get_next_dmrs_symbol_in_slot(rel15_ul_ref->ul_dmrs_symb_pos, rel15_ul_ref->start_symbol_index, end_symbol);
-  int size_est = nb_re_pusch * frame_parms->symbols_per_slot;
-  __attribute__((aligned(32))) c16_t ul_ch_estimates_ext[total_layers][num_sp_streams][size_est];
+  int size_est = ceil_mod(nb_re_pusch * frame_parms->symbols_per_slot, 16);
+  __attribute__((aligned(64))) c16_t ul_ch_estimates_ext[total_layers][num_sp_streams][size_est];
   memset(ul_ch_estimates_ext, 0, sizeof(ul_ch_estimates_ext));
   int buffer_length = rel15_ul_ref->rb_size * NR_NB_SC_PER_RB;
   c16_t temp_rxFext[num_sp_streams][buffer_length] __attribute__((aligned(32)));
@@ -796,17 +797,13 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
       stop_meas(&gNB->pusch_extraction_stats);
     }
 
-  uint8_t shift_ch_ext = total_layers > 1 ? log2_approx(max_ch >> 11) : 0;
-
   //----------------------------------------------------------
   //--------------------- Channel Scaling --------------------
   //----------------------------------------------------------
 
   int avg[total_layers][num_sp_streams];
-  for (int i = 0; i < total_layers; i++) {
-    nr_scale_channel(size_est, ul_ch_estimates_ext[i], meas_symbol, nb_re_pusch, num_sp_streams, shift_ch_ext);
+  for (int i = 0; i < total_layers; i++)
     nr_channel_level(meas_symbol, size_est, ul_ch_estimates_ext[i], num_sp_streams, avg[i], nb_re_pusch);
-  }
 
   int avgs = 0;
   for (int nl = 0; nl < total_layers; nl++)
@@ -820,6 +817,8 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
   else
     joint_pv->log2_maxh = (log2_approx(avgs) >> 1) + 1 + log2_approx(num_sp_streams >> 1);
 
+  // log2_maxh should be positive, we will use it in channel compensation for the int16 multiplications to int16 results
+  // so log2_maxh=15 is no scaling, a smaller value increase the signal, a higher value decrease the signal
   if (joint_pv->log2_maxh < 0)
     joint_pv->log2_maxh = 0;
 
@@ -880,6 +879,7 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
       rdata->pusch_vars_group = pusch_vars_group;
       rdata->scrambling_sequences = scrambling_sequences_arr;
       rdata->layer_offsets = layer_offset;
+      rdata->layers_attenuation = total_layers ? log2_approx(max_ch >> 11) : 0;
 
       if (rel15_ul_ref->pdu_bit_map & PUSCH_PDU_BITMAP_PUSCH_PTRS) {
         nr_pusch_symbol_processing(rdata);
