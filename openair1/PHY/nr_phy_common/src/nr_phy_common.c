@@ -396,34 +396,29 @@ void nr_channel_level(const int symbol,
                       const int size_est,
                       const c16_t ch_estimates_ext[][size_est],
                       const int nb_rx,
-                      const int Nl,
-                      int32_t avg[nb_rx * Nl],
+                      int32_t avg[nb_rx],
                       const uint32_t len)
 {
   for (int aarx = 0; aarx < nb_rx; aarx++) {
-    for (int l = 0; l < Nl; l++) {
-      // compute average squared module
-      avg[l * nb_rx + aarx] = signal_energy_nodc(ch_estimates_ext[l * nb_rx + aarx] + symbol * len, len);
-      LOG_D(PHY, "Channel level: %d\n", avg[l * nb_rx + aarx]);
-    }
+    // compute average squared module
+    avg[aarx] = signal_energy_nodc(ch_estimates_ext[aarx] + symbol * len, len);
+    LOG_D(PHY, "Channel level: %d\n", avg[aarx]);
   }
 }
 
-void nr_scale_channel(int size, c16_t ch_estimates_ext[][size], int symb, uint32_t len, int nrOfLayers, int nb_rx, int shift_ch_ext)
+void nr_scale_channel(int size, c16_t ch_estimates_ext[][size], int symb, uint32_t len, int nb_rx, int shift_ch_ext)
 {
-  for (int l = 0; l < nrOfLayers; l++) {
-    for (int aarx = 0; aarx < nb_rx; aarx++) {
-      simde__m128i *ul_ch128 = (simde__m128i *)&ch_estimates_ext[l * nb_rx + aarx][symb * len];
-      int loop_end = len >> 2;
-      for (int i = 0; i < loop_end; i++) {
-        ul_ch128[i] = simde_mm_srai_epi16(ul_ch128[i], shift_ch_ext);
-      }
-      // loop for the remaining elements
-      int start_index = loop_end * 4;
-      for (int j = start_index; j < len; j++) {
-        c16_t *temp = ((c16_t *)ul_ch128) + j;
-        *temp = c16Shift(*temp, shift_ch_ext);
-      }
+  for (int aarx = 0; aarx < nb_rx; aarx++) {
+    simde__m128i *ul_ch128 = (simde__m128i *)&ch_estimates_ext[aarx][symb * len];
+    int loop_end = len >> 2;
+    for (int i = 0; i < loop_end; i++) {
+      ul_ch128[i] = simde_mm_srai_epi16(ul_ch128[i], shift_ch_ext);
+    }
+    // loop for the remaining elements
+    int start_index = loop_end * 4;
+    for (int j = start_index; j < len; j++) {
+      c16_t *temp = ((c16_t *)ul_ch128) + j;
+      *temp = c16Shift(*temp, shift_ch_ext);
     }
   }
 }

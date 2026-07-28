@@ -899,7 +899,8 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
   //--------------------- Channel Scaling --------------------
   //----------------------------------------------------------
   start_meas_nr_ue_phy(ue, DLSCH_CHANNEL_SCALE_STATS);
-  nr_scale_channel(rx_size_symbol, dl_ch_estimates_ext, 0, nb_re_pdsch, nl, nbRx, 0);
+  for (int i = 0; i < nl; i++)
+    nr_scale_channel(rx_size_symbol, chFext[i], 0, nb_re_pdsch, nbRx, 0);
   stop_meas_nr_ue_phy(ue, DLSCH_CHANNEL_SCALE_STATS);
   if (meas_enabled) {
     LOG_D(PHY,
@@ -916,19 +917,20 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
   //----------------------------------------------------------
   start_meas_nr_ue_phy(ue, DLSCH_CHANNEL_LEVEL_STATS);
   if (first_symbol_flag) {
-    int32_t avg[nl * nbRx];
+    int32_t avg[nl][nbRx];
     if (nb_re_pdsch)
-      nr_channel_level(0, rx_size_symbol, (c16_t (*)[rx_size_symbol])dl_ch_estimates_ext, nbRx, nl, avg, nb_re_pdsch);
+      for (int i = 0; i < nl; i++)
+        nr_channel_level(0, rx_size_symbol, chFext[i], nbRx, avg[i], nb_re_pdsch);
     else
       LOG_E(NR_PHY, "Average channel level is 0: nb_rb_pdsch = %d, nb_re_pdsch = %d\n", nb_rb_pdsch, nb_re_pdsch);
     int avgs = 0;
     int32_t median[MAX_ANT][MAX_ANT];
     for (int l = 0; l < nl; l++)
       for (int aarx = 0; aarx < nbRx; aarx++) {
-        avgs = cmax(avgs, avg[l * nbRx + aarx]);
-        LOG_D(PHY, "nb_rb %d avg_%d_%d Power per SC is %d\n", nb_rb_pdsch, aarx, l, avg[l * nbRx + aarx]);
+        avgs = cmax(avgs, avg[l][aarx]);
+        LOG_D(PHY, "nb_rb %d avg_%d_%d Power per SC is %d\n", nb_rb_pdsch, aarx, l, avg[l][aarx]);
         LOG_D(PHY, "avgs Power per SC is %d\n", avgs);
-        median[l][aarx] = avg[l * nbRx + aarx];
+        median[l][aarx] = avg[l][aarx];
       }
 
     if (nl > 1) {
@@ -951,10 +953,10 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
       T_INT(gNB_id),
       T_INT(frame % 1024),
       T_INT(nr_slot_rx),
-      T_INT(avg[0]), // layer 0, antenna 0
-      T_INT(nbRx > 1 ? avg[1] : 0), // layer 0, antenna 1
-      T_INT(nl > 1 ? avg[nbRx] : 0), // layer 1, antenna 0
-      T_INT(nl > 1 && nbRx > 1 ? avg[nbRx + 1] : 0)); // layer 1, antenna 1
+      T_INT(avg[0][0]), // layer 0, antenna 0
+      T_INT(nbRx > 1 ? avg[0][1] : 0), // layer 0, antenna 1
+      T_INT(nl > 1 ? avg[1][0] : 0), // layer 1, antenna 0
+      T_INT(nl > 1 && nbRx > 1 ? avg[1][1] : 0)); // layer 1, antenna 1
 #endif
   }
   stop_meas_nr_ue_phy(ue, DLSCH_CHANNEL_LEVEL_STATS);

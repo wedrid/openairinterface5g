@@ -777,7 +777,7 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
   else // average of channel estimates stored in first symbol
     dmrs_symbol = get_next_dmrs_symbol_in_slot(rel15_ul_ref->ul_dmrs_symb_pos, rel15_ul_ref->start_symbol_index, end_symbol);
   int size_est = nb_re_pusch * frame_parms->symbols_per_slot;
-  __attribute__((aligned(32))) c16_t ul_ch_estimates_ext[total_layers * num_sp_streams][size_est];
+  __attribute__((aligned(32))) c16_t ul_ch_estimates_ext[total_layers][num_sp_streams][size_est];
   memset(ul_ch_estimates_ext, 0, sizeof(ul_ch_estimates_ext));
   int buffer_length = rel15_ul_ref->rb_size * NR_NB_SC_PER_RB;
   c16_t temp_rxFext[num_sp_streams][buffer_length] __attribute__((aligned(32)));
@@ -787,7 +787,7 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
       nr_ulsch_extract_rbs(gNB->common_vars.rxdataF[ant_port_start + aarx],
                            (c16_t *)joint_pv->ul_ch_estimates[nl * num_sp_streams + aarx],
                            temp_rxFext[aarx],
-                           &ul_ch_estimates_ext[nl * num_sp_streams + aarx][meas_symbol * nb_re_pusch],
+                           &ul_ch_estimates_ext[nl][aarx][meas_symbol * nb_re_pusch],
                            soffset + meas_symbol * frame_parms->ofdm_symbol_size,
                            dmrs_symbol * frame_parms->ofdm_symbol_size,
                            (rel15_ul_ref->ul_dmrs_symb_pos >> meas_symbol) & 0x01,
@@ -801,15 +801,17 @@ int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
   //----------------------------------------------------------
   //--------------------- Channel Scaling --------------------
   //----------------------------------------------------------
-  nr_scale_channel(size_est, ul_ch_estimates_ext, meas_symbol, nb_re_pusch, total_layers, num_sp_streams, shift_ch_ext);
 
-  int avg[num_sp_streams * total_layers];
-  nr_channel_level(meas_symbol, size_est, ul_ch_estimates_ext, num_sp_streams, total_layers, avg, nb_re_pusch);
+  int avg[total_layers][num_sp_streams];
+  for (int i = 0; i < total_layers; i++) {
+    nr_scale_channel(size_est, ul_ch_estimates_ext[i], meas_symbol, nb_re_pusch, num_sp_streams, shift_ch_ext);
+    nr_channel_level(meas_symbol, size_est, ul_ch_estimates_ext[i], num_sp_streams, avg[i], nb_re_pusch);
+  }
 
   int avgs = 0;
   for (int nl = 0; nl < total_layers; nl++)
     for (int aarx = 0; aarx < num_sp_streams; aarx++)
-      avgs = cmax(avgs, avg[nl * num_sp_streams + aarx]);
+      avgs = cmax(avgs, avg[nl][aarx]);
 
   if (total_layers == 2 && rel15_ul_ref->qam_mod_order > 6)
     joint_pv->log2_maxh = (log2_approx(avgs) >> 1) - 3; // for MMSE
