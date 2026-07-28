@@ -111,7 +111,7 @@ static uint32_t build_csi_overlap_bitmap(fapi_nr_dl_config_dlsch_pdu_rel15_t *dl
 //==============================================================================================
 
 static void nr_dlsch_channel_level_median(uint32_t rx_size_symbol,
-                                          int32_t dl_ch_estimates_ext[][rx_size_symbol],
+                                          c16_t dl_ch_estimates_ext[][rx_size_symbol],
                                           int32_t median[MAX_ANT][MAX_ANT],
                                           int n_tx,
                                           int n_rx,
@@ -154,7 +154,7 @@ static void nr_dlsch_extract_rbs(uint32_t rxdataF_sz,
                                  uint32_t pdsch_est_size,
                                  int32_t dl_ch_estimates[][pdsch_est_size],
                                  c16_t rxdataF_ext[][rx_size_symbol],
-                                 int32_t dl_ch_estimates_ext[][rx_size_symbol],
+                                 c16_t dl_ch_estimates_ext[][rx_size_symbol],
                                  unsigned char symbol,
                                  uint8_t pilots,
                                  const fapi_nr_dl_config_dlsch_pdu_rel15_t *dlsch_config,
@@ -214,7 +214,7 @@ static void nr_dlsch_extract_rbs(uint32_t rxdataF_sz,
       c16_t *rxF = &rxdataF[aarx][symbol * fp->ofdm_symbol_size];
       for (int l = 0; l < Nl; l++) {
         int32_t *dl_ch0 = &dl_ch_estimates[(l * fp->nb_antennas_rx) + aarx][validDmrsEst * fp->ofdm_symbol_size];
-        int32_t *dl_ch0_ext = dl_ch_estimates_ext[(l * fp->nb_antennas_rx) + aarx] + offset;
+        c16_t *dl_ch0_ext = dl_ch_estimates_ext[(l * fp->nb_antennas_rx) + aarx] + offset;
         if (pilots == 0 && csi_res_bitmap == 0) { // data symbol only
           if (l == 0) {
             if (start_re + nb_rb * NR_NB_SC_PER_RB <= fp->ofdm_symbol_size) {
@@ -237,7 +237,7 @@ static void nr_dlsch_extract_rbs(uint32_t rxdataF_sz,
                 // DATA RE
                 if (l == 0)
                   rxF_ext[j] = rxF[k];
-                dl_ch0_ext[j] = dl_ch0[re];
+                dl_ch0_ext[j] = *(c16_t *)(dl_ch0 + re);
                 j++;
               }
               k++;
@@ -532,7 +532,7 @@ static void nr_dlsch_mmse(uint32_t pdsch_buf_size_max,
                           c16_t dl_ch_mag[][pdsch_buf_size_max],
                           c16_t dl_ch_magb[][pdsch_buf_size_max],
                           c16_t dl_ch_magr[][pdsch_buf_size_max],
-                          int32_t dl_ch_estimates_ext[][rx_size_symbol],
+                          c16_t dl_ch_estimates_ext[][rx_size_symbol],
                           unsigned char mod_order,
                           int shift,
                           int length,
@@ -554,8 +554,8 @@ static void nr_dlsch_mmse(uint32_t pdsch_buf_size_max,
   for (int rtx = 0; rtx < nl; rtx++) {//row
     for (int ctx = 0; ctx < nl; ctx++) {//column
       for (int aarx = 0; aarx < n_rx; aarx++)  {
-        c16_t *ch0r = (c16_t *)dl_ch_estimates_ext[rtx * n_rx + aarx];
-        c16_t *ch0c = (c16_t *)dl_ch_estimates_ext[ctx * n_rx + aarx];
+        c16_t *ch0r = dl_ch_estimates_ext[rtx * n_rx + aarx];
+        c16_t *ch0c = dl_ch_estimates_ext[ctx * n_rx + aarx];
         nr_conjch0_mult_ch1(ch0r,
                             ch0c,
                             conjH_H_elements[aarx][ctx][rtx], // sic
@@ -772,7 +772,7 @@ int nr_rx_pdsch(PHY_VARS_NR_UE *ue,
   const int nl = dlsch->cw_info.Nl;
   const int matrixSz = nbRx * nl;
   const uint32_t rx_size_symbol = (freq_alloc->num_rbs * NR_NB_SC_PER_RB + 15) & ~15;
-  __attribute__((aligned(32))) int32_t dl_ch_estimates_ext[matrixSz][rx_size_symbol];
+  __attribute__((aligned(32))) c16_t dl_ch_estimates_ext[matrixSz][rx_size_symbol];
 
   // Use ML-based LLR for 2-layer MIMO with QPSK/16QAM/64QAM (nl==2, qamModOrder<=6).
   // Controlled by ue->do_ml (set via -E flag in dlsim, or ue->do_ml in the UE struct).

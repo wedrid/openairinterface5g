@@ -409,7 +409,7 @@ void nr_channel_level(const int symbol,
   }
 }
 
-void nr_scale_channel(int size, int ch_estimates_ext[][size], int symb, uint32_t len, int nrOfLayers, int nb_rx, int shift_ch_ext)
+void nr_scale_channel(int size, c16_t ch_estimates_ext[][size], int symb, uint32_t len, int nrOfLayers, int nb_rx, int shift_ch_ext)
 {
   for (int l = 0; l < nrOfLayers; l++) {
     for (int aarx = 0; aarx < nb_rx; aarx++) {
