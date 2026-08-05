@@ -2403,14 +2403,14 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
  * @ulsch_buffer  Pointer to ULSCH PDU
  * @buflen        TBS
  */
-static uint8_t nr_ue_get_sdu(NR_UE_MAC_INST_t *mac,
-                             frame_t frame,
-                             slot_t slot,
-                             uint8_t *ulsch_buffer,
-                             const uint32_t buflen,
-                             int tx_power,
-                             int P_CMAX,
-                             bool *BSRsent)
+static bool nr_ue_get_sdu(NR_UE_MAC_INST_t *mac,
+                          frame_t frame,
+                          slot_t slot,
+                          uint8_t *ulsch_buffer,
+                          const uint32_t buflen,
+                          int tx_power,
+                          int P_CMAX,
+                          bool *BSRsent)
 {
   NR_UE_MAC_CE_INFO mac_ce_info;
 
@@ -2437,7 +2437,7 @@ static uint8_t nr_ue_get_sdu(NR_UE_MAC_INST_t *mac,
   // variable used to build the lcids with positive Bj
   if (!mac->lc_ordered_list.count) {
     LOG_E(NR_MAC, "Failed to init lcids_bj_pos: mac->lc_ordered_list.count = 0\n");
-    return 0;
+    return false;
   }
   nr_lcordered_info_t *lcids_bj_pos[mac->lc_ordered_list.count];
   int avail_lcids_count = select_logical_channels(mac, lcids_bj_pos);
@@ -2542,7 +2542,7 @@ static uint8_t nr_ue_get_sdu(NR_UE_MAC_INST_t *mac,
   log_dump(NR_MAC, ulsch_buffer, buflen, LOG_DUMP_CHAR, "\n");
 #endif
 
-  return mac_ce_info.num_sdus > 0; // success if we got at least one sdu
+  return true; // success if we got at least one sdu
 }
 
 void nr_ue_ul_scheduler(NR_UE_MAC_INST_t *mac, nr_uplink_indication_t *ul_info)
@@ -2622,13 +2622,18 @@ void nr_ue_ul_scheduler(NR_UE_MAC_INST_t *mac, nr_uplink_indication_t *ul_info)
                                     tp_enabled,
                                     pdu->rb_size,
                                     pdu->rb_start);
-
-          nr_ue_get_sdu(mac, frame_tx, slot_tx, ulsch_input_buffer, TBS_bytes, tx_power, P_CMAX, &BSRsent);
-          pdu->tx_request_body.fapiTxPdu = ulsch_input_buffer;
-          pdu->tx_request_body.pdu_length = TBS_bytes;
-          number_of_pdus++;
-          T(T_NRUE_MAC_UL_PDU_WITH_DATA, T_INT(mac->crnti), T_INT(frame_tx), T_INT(slot_tx),
-            T_INT(ulcfg_pdu->pusch_config_pdu.pusch_data.harq_process_id), T_BUFFER(ulsch_input_buffer, TBS_bytes));
+          if (nr_ue_get_sdu(mac, frame_tx, slot_tx, ulsch_input_buffer, TBS_bytes, tx_power, P_CMAX, &BSRsent)) {
+            pdu->tx_request_body.fapiTxPdu = ulsch_input_buffer;
+            pdu->tx_request_body.pdu_length = TBS_bytes;
+            number_of_pdus++;
+            T(T_NRUE_MAC_UL_PDU_WITH_DATA,
+              T_INT(mac->crnti),
+              T_INT(frame_tx),
+              T_INT(slot_tx),
+              T_INT(ulcfg_pdu->pusch_config_pdu.pusch_data.harq_process_id),
+              T_BUFFER(ulsch_input_buffer, TBS_bytes));
+          } else
+            LOG_E(MAC, "nr_ue_get_sdu() failed\n");
           // start or restart dataInactivityTimer  if any MAC entity transmits a MAC SDU for DTCH logical channel,
           // or DCCH logical channel
           if (mac->data_inactivity_timer)

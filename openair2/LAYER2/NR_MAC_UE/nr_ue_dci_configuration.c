@@ -84,6 +84,10 @@ static void config_dci_pdu(NR_UE_MAC_INST_t *mac,
                            const int slot,
                            const NR_SearchSpace_t *ss)
 {
+  if (!mac->mib) {
+    LOG_E(MAC, "Incoherent call to dci configuration while mib decode not yet available\n");
+    return;
+  }
   const NR_UE_DL_BWP_t *current_DL_BWP = mac->current_DL_BWP;
   const NR_UE_UL_BWP_t *current_UL_BWP = mac->current_UL_BWP;
   NR_BWP_Id_t dl_bwp_id = current_DL_BWP ? current_DL_BWP->bwp_id : 0;
@@ -504,19 +508,23 @@ void update_pdcch_config(NR_UE_MAC_INST_t *mac)
     ssb_sc_offset_norm = mac->ssb_subcarrier_offset;
   uint16_t ssb_offset_point_a = (mac->ssb_start_subcarrier - ssb_sc_offset_norm) / 12;
   int ssb_start_symbol = get_ssb_start_symbol(mac->nr_band, scs, mac->mib_ssb);
-  get_type0_PDCCH_CSS_config_parameters(&mac->type0_PDCCH_CSS_config,
-                                        mac->mib_frame,
-                                        mac->mib,
-                                        slots_per_frame,
-                                        ssb_sc_offset_norm,
-                                        ssb_start_symbol,
-                                        scs,
-                                        mac->frequency_range,
-                                        mac->nr_band,
-                                        273,  // at this point UE in principle doesn't know the grid size (we assume the largest)
-                                        mac->mib_ssb,
-                                        1, // If the UE is not configured with a periodicity, the UE assumes a periodicity of a half frame
-                                        ssb_offset_point_a);
+  if (mac->mib)
+    get_type0_PDCCH_CSS_config_parameters(
+        &mac->type0_PDCCH_CSS_config,
+        mac->mib_frame,
+        mac->mib,
+        slots_per_frame,
+        ssb_sc_offset_norm,
+        ssb_start_symbol,
+        scs,
+        mac->frequency_range,
+        mac->nr_band,
+        273, // at this point UE in principle doesn't know the grid size (we assume the largest)
+        mac->mib_ssb,
+        1, // If the UE is not configured with a periodicity, the UE assumes a periodicity of a half frame
+        ssb_offset_point_a);
+  else
+    LOG_E(MAC, "Call update_pdcch_config( but no mib\n");
   if (mac->search_space_zero == NULL)
     mac->search_space_zero = calloc(1, sizeof(*mac->search_space_zero));
   if (mac->coreset0 == NULL)
@@ -532,6 +540,8 @@ void ue_dci_configuration(NR_UE_MAC_INST_t *mac, fapi_nr_dl_config_request_t *dl
   NR_BWP_PDCCH_t *pdcch_config = &mac->config_BWP_PDCCH[dl_bwp_id];
   int scs = current_DL_BWP ? current_DL_BWP->scs : mac->numerology;
   const int slots_per_frame = get_slots_per_frame_from_scs(scs);
+  if (!mac->mib)
+    return;
   if (mac->get_sib1 || mac->update_pdcch_config) {
     update_pdcch_config(mac);
     mac->update_pdcch_config = false;
