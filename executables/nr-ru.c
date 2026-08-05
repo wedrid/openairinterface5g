@@ -247,55 +247,11 @@ static void rx_rf(RU_t *ru, int *frame, int *slot)
   stop_meas(&ru->rx_fhaul);
 }
 
-static radio_tx_gpio_flag_t get_gpio_flags(RU_t *ru, int slot)
-{
-  radio_tx_gpio_flag_t flags_gpio = 0;
-  NR_DL_FRAME_PARMS *fp = ru->nr_frame_parms;
-  openair0_config_t *cfg0 = &ru->openair0_cfg;
-
-  switch (cfg0->gpio_controller) {
-    case RU_GPIO_CONTROL_GENERIC:
-      // currently we switch beams at the beginning of a slot and we take the beam index of the first symbol of this slot
-      // we only send the beam to the gpio if the beam is different from the previous slot
-
-      if (ru->common.beam_id) {
-        int prev_slot = (slot - 1 + fp->slots_per_frame) % fp->slots_per_frame;
-        uint16_t **beam_ids = ru->common.beam_id;
-        uint16_t prev_beam = beam_ids[prev_slot * fp->symbols_per_slot][0];
-        int beam = beam_ids[slot * fp->symbols_per_slot][0];
-        if (prev_beam != beam) {
-          flags_gpio = beam | TX_GPIO_CHANGE; // enable change of gpio
-          LOG_I(HW, "slot %d, beam %d\n", slot, beam_ids[slot * fp->symbols_per_slot][0]);
-        }
-      }
-      break;
-
-    case RU_GPIO_CONTROL_INTERDIGITAL: {
-      // the beam index is written in bits 8-10 of the flags
-      // bit 11 enables the gpio programming
-      int beam = 0;
-      if ((slot % 10 == 0) && ru->common.beam_id && (ru->common.beam_id[slot * fp->symbols_per_slot][0] < 64)) {
-        // beam = ru->common.beam_id[0][slot*fp->symbols_per_slot] | 64;
-        beam = 1024; // hardcoded now for beam32 boresight
-        // beam = 127; //for the sake of trying beam63
-        LOG_D(HW, "slot %d, beam %d\n", slot, beam);
-      }
-      flags_gpio = beam | TX_GPIO_CHANGE;
-      // flags_gpio |= beam << 8; // MSB 8 bits are used for beam
-      LOG_I(HW, "slot %d, beam %d, flags_gpio %d\n", slot, beam, flags_gpio);
-      break;
-    }
-    default:
-      AssertFatal(false, "illegal GPIO controller %d\n", cfg0->gpio_controller);
-  }
-
-  return flags_gpio;
-}
-
 int tx_rf_symbols(RU_t *ru, int frame, int slot, uint64_t timestamp, int start_symbol, int num_symbols)
 {
   RU_proc_t *proc = &ru->proc;
   NR_DL_FRAME_PARMS *fp = ru->nr_frame_parms;
+  uint64_t ts = timestamp + ru->ts_offset;
   nfapi_nr_config_request_scf_t *cfg = &ru->config;
   T(T_ENB_PHY_OUTPUT_SIGNAL,
     T_INT(0),
@@ -307,7 +263,6 @@ int tx_rf_symbols(RU_t *ru, int frame, int slot, uint64_t timestamp, int start_s
   int sf_extension = 0;
   int siglen = get_samples_per_slot(slot, fp);
   radio_tx_burst_flag_t flags_burst = TX_BURST_INVALID;
-  radio_tx_gpio_flag_t flags_gpio = 0;
   int transmitted_symbols = num_symbols;
 
   if (cfg->cell_config.frame_duplex_type.value == TDD && !get_softmodem_params()->continuous_tx && !IS_SOFTMODEM_RFSIM) {
@@ -344,6 +299,7 @@ int tx_rf_symbols(RU_t *ru, int frame, int slot, uint64_t timestamp, int start_s
       if (prevslot_type == NR_UPLINK_SLOT) {
         flags_burst = TX_BURST_START;
         sf_extension = ru->sf_extension;
+        ts -= sf_extension;
       } else if (nextslot_type == NR_UPLINK_SLOT) {
         flags_burst = TX_BURST_END;
       } else {
@@ -359,25 +315,24 @@ int tx_rf_symbols(RU_t *ru, int frame, int slot, uint64_t timestamp, int start_s
     siglen = get_samples_symbol_duration(fp, slot, start_symbol, num_symbols);
   }
 
-  if (ru->openair0_cfg.gpio_controller != RU_GPIO_CONTROL_NONE)
-    flags_gpio = get_gpio_flags(ru, slot);
-
-  const int flags = flags_burst | (flags_gpio << 4);
   proc->first_tx = 0;
 
   int nt = ru->nb_tx;
   void *txp[nt];
   uint32_t time_offset = get_samples_slot_timestamp(fp, slot) + get_samples_symbol_timestamp(fp, slot, start_symbol);
+  // prepare tx buffer pointers
   for (int i = 0; i < nt; i++)
     txp[i] = (void *)&ru->common.txdata[i][time_offset] - sf_extension * sizeof(int32_t);
 
-  // prepare tx buffer pointers
+  // assumption [slot * fp->symbols_per_slot + 0] = all symbols within a slot carry the same beam ID
+  ru->rfdevice.trx_set_beams(&ru->rfdevice, ru->common.beam_id[slot * fp->symbols_per_slot + 0], nt, ts);
+
   uint32_t txs = ru->rfdevice.trx_write_func(&ru->rfdevice,
                                              timestamp + ru->ts_offset - sf_extension,
                                              txp,
                                              siglen + sf_extension,
                                              nt,
-                                             flags);
+                                             flags_burst);
   LOG_D(PHY,
         "[TXPATH] RU %d tx_rf, writing to TS %lu, %d.%d, unwrapped_frame %d, slot %d, flags %d, siglen+sf_extension %d, "
         "returned %d, E %f\n",
@@ -387,7 +342,7 @@ int tx_rf_symbols(RU_t *ru, int frame, int slot, uint64_t timestamp, int start_s
         slot,
         proc->frame_tx_unwrap,
         slot,
-        flags,
+        flags_burst,
         siglen + sf_extension,
         txs,
         10 * log10((double)signal_energy(txp[0], siglen + sf_extension)));
