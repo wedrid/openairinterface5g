@@ -623,8 +623,9 @@ int xran_fh_rx_read_slot(ru_info_t *ru, int *frame, int *slot)
 }
 
 // Send CP DL/UL packets
-int xran_send_cp_slot(const uint8_t nb_ant, uint16_t **beams, const int tti, const int slot, struct xran_buffer_list buf[XRAN_MAX_ANTENNA_NR][XRAN_N_FE_BUF_LEN])
+int xran_send_cp_slot(const int tti, const int slot, uint16_t **beams, const uint32_t nb_ant, void *data)
 {
+  struct xran_buffer_list (*buf)[XRAN_N_FE_BUF_LEN] = (struct xran_buffer_list (*)[XRAN_N_FE_BUF_LEN])data;
   for (uint8_t ant_id = 0; ant_id < nb_ant; ant_id++) {
     struct xran_prb_map *pPrbMap = (struct xran_prb_map *)buf[ant_id][tti % XRAN_N_FE_BUF_LEN].pBuffers->pData;
     // (1) nPrbElm is the number of fragments; (2) For Liteon FR2 with RunSlotPrbMapBySymbolEnable each idxElm matches to one symbol

@@ -216,7 +216,7 @@ void oran_fh_if4p5_south_out(RU_t *ru, int frame, int slot, uint64_t timestamp)
       // UL slot
       if (frame_conf->nFrameDuplexType == XRAN_FDD || is_tdd_ul_guard_slot(frame_conf, slot)) {
         // Send CP UL
-        ret = xran_send_cp_slot(fh_cfg->neAxcUl, ru->common.beam_id, tti, slot, bufs->dstcp);
+        ret = ru->ifdevice.trx_set_fh_beams(tti, slot, ru->common.beam_id, fh_cfg->neAxcUl, bufs->dstcp);
         if (ret != 0) {
           LOG_W(HW, "[%d.%d] xran_send_cp_slot UL error for xran_port %d\n", frame, slot, xran_port);
         }
@@ -225,7 +225,7 @@ void oran_fh_if4p5_south_out(RU_t *ru, int frame, int slot, uint64_t timestamp)
       // DL slot
       if (frame_conf->nFrameDuplexType == XRAN_FDD || is_tdd_dl_guard_slot(frame_conf, slot)) {
         // Send CP DL
-        ret = xran_send_cp_slot(fh_cfg->neAxc, ru->common.beam_id, tti, slot, bufs->srccp);
+        ret = ru->ifdevice.trx_set_fh_beams(tti, slot, ru->common.beam_id, fh_cfg->neAxc, bufs->srccp);
 	if (ret != 0) {
           LOG_W(HW, "[%d.%d] xran_send_cp_slot DL error for xran_port %d\n", frame, slot, xran_port);
         }
@@ -342,6 +342,7 @@ __attribute__((__visibility__("default"))) int transport_init(openair0_device_t 
   device->trx_get_stats_func = trx_oran_get_stats;
   device->trx_end_func = trx_oran_end;
   device->trx_stop_func = trx_oran_stop;
+  device->trx_set_fh_beams = xran_send_cp_slot;
   device->get_internal_parameter = get_internal_parameter;
   device->priv = eth;
   device->openair0_cfg = &openair0_cfg[0];

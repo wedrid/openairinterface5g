@@ -490,6 +490,15 @@ struct openair0_device {
    */
   int (*trx_set_gains_func)(openair0_device_t *device, openair0_config_t *openair0_cfg);
 
+  /*! \brief Set beam IDs for each symbol and each logical antenna port
+   *
+   * \param device the hardware to use
+   * \param beams pointer to array of beam ids
+   * \param num_beams number of beams. Expected to be equal to number of antennas
+   * \return 0 on success
+   */
+  int (*trx_set_fh_beams)(const int tti, const int slot, uint16_t **beams, const uint32_t nb_ant, void *data);
+
   /*! \brief Set tx/rx beams
    *
    * Set the tx/rx beams. This has to be done in advance of the reception in order to
