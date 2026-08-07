@@ -2854,6 +2854,23 @@ static void create_ul_harq_list(NR_UE_sched_ctrl_t *sched_ctrl, const NR_UE_Serv
   }
 }
 
+void reset_sc_info(NR_UE_ServingCell_Info_t *sc_info)
+{
+  sc_info->csi_MeasConfig = NULL;
+  sc_info->nrofHARQ_ProcessesForPDSCH = NULL;
+  sc_info->maxMIMO_Layers_PDSCH = NULL;
+  sc_info->downlinkHARQ_FeedbackDisabled_r17 = NULL;
+  sc_info->pdsch_CGB_Transmission = NULL;
+  sc_info->nrofHARQ_ProcessesForPDSCH_v1700 = NULL;
+  sc_info->crossCarrierSchedulingConfig = NULL;
+  sc_info->supplementaryUplink = NULL;
+  sc_info->carrierSwitching = NULL;
+  sc_info->maxMIMO_Layers_PUSCH = NULL;
+  sc_info->rateMatching_PUSCH = NULL;
+  sc_info->pusch_CGB_Transmission = NULL;
+  sc_info->nrofHARQ_ProcessesForPUSCH_r17 = NULL;
+}
+
 // main function to configure parameters of current BWP
 void configure_UE_BWP(gNB_MAC_INST *nr_mac,
                       NR_ServingCellConfigCommon_t *scc,
@@ -2930,6 +2947,7 @@ void configure_UE_BWP(gNB_MAC_INST *nr_mac,
     DL_BWP->pdsch_Config = NULL;
     UL_BWP->pusch_Config = NULL;
     UL_BWP->pucch_Config = NULL;
+    UL_BWP->srs_Config = NULL;
     UL_BWP->configuredGrantConfig = NULL;
   }
 
@@ -3037,21 +3055,8 @@ void configure_UE_BWP(gNB_MAC_INST *nr_mac,
             sc_info->nrofHARQ_ProcessesForPUSCH_r17 = pusch_servingcellconfig->ext3->nrofHARQ_ProcessesForPUSCH_r17;
         }
       }
-    } else {
-      sc_info->csi_MeasConfig = NULL;
-      sc_info->nrofHARQ_ProcessesForPDSCH = NULL;
-      sc_info->maxMIMO_Layers_PDSCH = NULL;
-      sc_info->downlinkHARQ_FeedbackDisabled_r17 = NULL;
-      sc_info->pdsch_CGB_Transmission = NULL;
-      sc_info->nrofHARQ_ProcessesForPDSCH_v1700 = NULL;
-      sc_info->crossCarrierSchedulingConfig = NULL;
-      sc_info->supplementaryUplink = NULL;
-      sc_info->carrierSwitching = NULL;
-      sc_info->maxMIMO_Layers_PUSCH = NULL;
-      sc_info->rateMatching_PUSCH = NULL;
-      sc_info->pusch_CGB_Transmission = NULL;
-      sc_info->nrofHARQ_ProcessesForPUSCH_r17 = NULL;
-    }
+    } else
+      reset_sc_info(sc_info);
 
     if (CellGroup && CellGroup->physicalCellGroupConfig)
       UE->pdsch_HARQ_ACK_Codebook = CellGroup->physicalCellGroupConfig->pdsch_HARQ_ACK_Codebook;
