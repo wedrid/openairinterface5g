@@ -1273,6 +1273,8 @@ typedef struct gNB_MAC_INST_s {
   time_stats_t schedule_ulsch;  // include preprocessor
   /// processing time of gNB DLSCH scheduler
   time_stats_t schedule_dlsch;  // include rlc_data_req + MAC header + preprocessor
+  /// processing time of CSI-RS CSI reporting SR and periodic SRS
+  time_stats_t schedule_periodic;
   /// processing time of rlc_data_req
   time_stats_t rlc_data_req;
   /// processing time of nr_srs_ri_computation

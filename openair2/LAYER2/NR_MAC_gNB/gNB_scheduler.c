@@ -212,6 +212,7 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
     schedule_nr_prach(module_idP, f, s);
   }
 
+  start_meas(&gNB->schedule_periodic);
   // Schedule CSI-RS transmission
   nr_csirs_scheduling(module_idP, frame, slot, &sched_info->DL_req);
 
@@ -219,6 +220,9 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   nr_csi_meas_reporting(module_idP, frame, slot);
 
   nr_schedule_periodic_srs(module_idP, frame, slot);
+
+  nr_sr_reporting(gNB, frame, slot);
+  stop_meas(&gNB->schedule_periodic);
 
   // This schedule RA procedure if not in phy_test mode
   // Otherwise consider 5G already connected
@@ -230,8 +234,6 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   start_meas(&gNB->schedule_ulsch);
   nr_schedule_ulsch(module_idP, frame, slot, &sched_info->UL_dci_req);
   stop_meas(&gNB->schedule_ulsch);
-
-  nr_sr_reporting(gNB, frame, slot);
 
   // This schedules the DCI for Downlink and PDSCH
   start_meas(&gNB->schedule_dlsch);
