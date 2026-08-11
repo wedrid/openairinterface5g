@@ -405,19 +405,6 @@ __attribute__((always_inline)) static inline __m512i oai_mm512_conj(__m512i a)
   return(_mm512_mask_sub_epi16(a, odd, _mm512_setzero_si512(), a));
 }
 
-__attribute__((always_inline)) static inline __m512i oai_mm512_swap(__m512i a)
-
-{
-  // Shuffle mask to swap bytes for IQ swapping
-  const oai512_t shuffle_mask_swap = {.i8 = {
-                                          2,  3,  0,  1,  6,  7,  4,  5,  10, 11, 8,  9,  14, 15, 12, 13,
-                                          18, 19, 16, 17, 22, 23, 20, 21, 26, 27, 24, 25, 30, 31, 28, 29,
-                                          34, 35, 32, 33, 38, 39, 36, 37, 42, 43, 40, 41, 46, 47, 44, 45,
-                                          50, 51, 48, 49, 54, 55, 52, 53, 58, 59, 56, 57, 62, 63, 60, 61
-                                      }};
-  return _mm512_shuffle_epi8(a, shuffle_mask_swap.v);
-}
-
 __attribute__((always_inline)) static inline
 __m512i oai_mm512_smadd(__m512i z1, __m512i z2, int shift)
 {
