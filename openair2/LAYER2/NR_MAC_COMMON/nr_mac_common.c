@@ -3756,6 +3756,10 @@ void get_type0_PDCCH_CSS_config_parameters(NR_Type0_PDCCH_CSS_config_t *type0_PD
                                            uint32_t ssb_period,
                                            uint32_t ssb_offset_point_a)
 {
+  if (!mib) {
+    LOG_E(MAC, "get_type0_PDCCH_CSS_config_parameters() called while mib is not available, mac layer incoherency\n");
+    return;
+  }
   // according to Table 5.3.5-1 in 38.104
   // band 79 is the only one which minimum is 40
   // for all the other channels it is either 10 or 5
