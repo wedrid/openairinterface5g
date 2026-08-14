@@ -1891,8 +1891,9 @@ void update_ul_ue_R_Qm(int mcs, int mcs_table, const NR_PUSCH_Config_t *pusch_Co
   }
 }
 
-static int verify_aperiodic_srs(gNB_MAC_INST *nrmac, int slot, int k2, NR_timer_t *aperiodic_srs, NR_UE_UL_BWP_t *current_BWP)
+static int verify_aperiodic_srs(gNB_MAC_INST *nrmac, int slot, int k2, NR_timer_t *aperiodic_srs, NR_UE_info_t *UE)
 {
+  NR_UE_UL_BWP_t *current_BWP = &UE->current_UL_BWP;
   if (nrmac->radio_config.do_SRS != APERIODIC_SRS || current_BWP->dci_format == NR_UL_DCI_FORMAT_0_0 || !current_BWP->srs_Config)
     return 0;
 
@@ -1905,17 +1906,10 @@ static int verify_aperiodic_srs(gNB_MAC_INST *nrmac, int slot, int k2, NR_timer_
 
   // finally we check if the aperiodic SRS timer has expired
   if (nr_timer_expired(aperiodic_srs)) {
-    NR_SRS_Config_t *srs_config = current_BWP->srs_Config;
-    for(int rs = 0; rs < srs_config->srs_ResourceSetToAddModList->list.count; rs++) {
-      // Find periodic resource set
-      NR_SRS_ResourceSet_t *srs_resource_set = srs_config->srs_ResourceSetToAddModList->list.array[rs];
-      if (srs_resource_set->resourceType.present == NR_SRS_ResourceSet__resourceType_PR_aperiodic) {
-        struct NR_SRS_ResourceSet__resourceType__aperiodic *aperiodic = srs_resource_set->resourceType.choice.aperiodic;
-        int offset = aperiodic->slotOffset ? *aperiodic->slotOffset : 0;
-        if (offset == k2)
-          return aperiodic->aperiodicSRS_ResourceTrigger;
-      }
-    }
+    NR_sched_srs_t *sched_srs = &UE->UE_sched_ctrl.sched_srs;
+    int offset = sched_srs->aperiodic_slotOffset ? *sched_srs->aperiodic_slotOffset : 0;
+    if (offset == k2)
+      return sched_srs->aperiodic_ResourceTrigger;
   }
   return 0;
 }
@@ -2723,7 +2717,7 @@ static int collect_ul_candidates(gNB_MAC_INST *mac,
 
     cand.is_retx = false;
     if (!aperiodic_srs_scheduled) {
-      cand.sched_srs = verify_aperiodic_srs(mac, sched_slot, k2, &sched_ctrl->aperiodic_srs_trigger, current_BWP);
+      cand.sched_srs = verify_aperiodic_srs(mac, sched_slot, k2, &sched_ctrl->sched_srs.aperiodic_srs_timer, UE);
       aperiodic_srs_scheduled = cand.sched_srs > 0;
     } else
       cand.sched_srs = 0;
