@@ -573,7 +573,7 @@ static NR_UE_info_t *create_new_UE(gNB_MAC_INST *mac, uint32_t cu_id, const NR_C
     DevAssert(res);
   } else {
     if (!add_new_UE_RA(mac, UE)) {
-      delete_nr_ue_data(UE, &mac->UE_info.uid_allocator);
+      delete_nr_ue_data(mac, UE);
       LOG_E(NR_MAC, "UE list full while creating new UE\n");
       return NULL;
     }

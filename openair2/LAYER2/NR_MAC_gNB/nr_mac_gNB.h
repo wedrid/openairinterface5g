@@ -99,6 +99,12 @@ typedef enum {
   nrRA_WAIT_Msg4_MsgB_ACK,
 } RA_gNB_state_t;
 
+typedef enum {
+  CSI_RS,
+  CSI_MEASUREMENTS,
+  SRS
+} nr_periodic_channel_t;
+
 static const char *const nrra_text[] =
     {"IDLE", "Msg2", "WAIT_MsgA_PUSCH", "WAIT_Msg3", "Msg3_retransmission", "Msg4", "MsgB", "WAIT_Msg4_MsgB_ACK"};
 
@@ -646,11 +652,22 @@ typedef struct nr_power_control {
 } nr_power_control_t;
 
 typedef struct {
-  long usage;
-  NR_SRS_Resource_t *srs_resource;
   long *aperiodic_slotOffset;
   long aperiodic_ResourceTrigger;
   NR_timer_t aperiodic_srs_timer;
+} NR_sched_aperiodic_srs_t;
+
+typedef struct {
+  int periodic_offset;
+} NR_sched_periodic_srs_t;
+
+typedef struct {
+  long usage;
+  NR_SRS_Resource_t *srs_resource;
+  union {
+    NR_sched_aperiodic_srs_t aperiodic_sched;
+    NR_sched_periodic_srs_t periodic_sched;
+  };
 } NR_sched_srs_t;
 
 /*! \brief scheduling control information set through an API */
@@ -1254,6 +1271,8 @@ typedef struct gNB_MAC_INST_s {
   int vrb_map_UL_size;
 
   NR_UEs_t UE_info;
+  NR_UE_info_t **period_srs_sched;
+  int srs_period;
 
   // MAC function execution peformance profiler
   /// processing time of gNB scheduler
