@@ -25,6 +25,7 @@
 #include "PHY/NR_REFSIG/ul_ref_seq_nr.h"
 #include <string.h>
 #include "nfapi/open-nFAPI/fapi/inc/nr_fapi_p5_utils.h"
+#include "nr_phy_common.h"
 
 static void init_DLSCH_struct(PHY_VARS_gNB *gNB);
 static void destroy_DLSCH_struct(const PHY_VARS_gNB *gNB);
