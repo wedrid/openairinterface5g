@@ -1691,11 +1691,7 @@ static void nr_rrc_ue_process_rrcReconfiguration(NR_UE_RRC_INST_t *rrc, int gNB_
                                               0,
                                               0);
         if ((dec_rval.code != RC_OK) && (dec_rval.consumed == 0)) {
-          uint8_t *buffer = ie->secondaryCellGroup->buf;
-          RRCLOG_E("NR_CellGroupConfig decode error\n");
-          for (int i = 0; i < ie->secondaryCellGroup->size; i++)
-            RRCLOG_E("%02x ", buffer[i]);
-          RRCLOG_E("\n");
+          RRCLOG_E("NR_CellGroupConfig decode error, size: %ld\n", ie->secondaryCellGroup->size);
           // free the memory
           SEQUENCE_free(&asn_DEF_NR_CellGroupConfig, (void *)cellGroupConfig, 1);
           // if the ASN1 decoding fails for the received CellGroup configuration
