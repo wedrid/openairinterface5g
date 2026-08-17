@@ -3316,6 +3316,7 @@ void *rrc_nrue(void *notUsed)
   case NRRRC_FRAME_PROCESS:
     rrc->current_hfn = NRRRC_FRAME_PROCESS(msg_p).hfn;
     rrc->current_frame = NRRRC_FRAME_PROCESS(msg_p).frame;
+    RRCLOG_D("Got new frame information: %d\n", rrc->current_frame);
     // increase the timers every 10ms (every new frame)
     nr_rrc_handle_timers(rrc);
     NR_UE_RRC_SI_INFO *SInfo = &rrc->perNB[NRRRC_FRAME_PROCESS(msg_p).gnb_id].SInfo;
