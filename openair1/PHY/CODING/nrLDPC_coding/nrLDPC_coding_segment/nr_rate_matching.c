@@ -1132,7 +1132,7 @@ int nr_rate_matching_ldpc(uint32_t Tbslbrm,
 }
 
 #define RMLOOP                                                                                                                \
-  for (; ind < (ind2 & 7); k += 8, ind += 8)                                                                                  \
+  for (; ind + 8 < ind2; k += 8, ind += 8)                                                                                    \
     simde_mm_storeu_si128(&d[ind], simde_mm_adds_epi16(simde_mm_loadu_si128(&soft_input[k]), simde_mm_loadu_si128(&d[ind]))); \
   for (; ind < ind2; ind++, k++)                                                                                              \
     d[ind] += soft_input[k];
@@ -1222,8 +1222,7 @@ int nr_rate_matching_ldpc_rx(uint32_t Tbslbrm,
                              uint32_t Foffset)
 {
   if (BG == 1) {
-    nr_rate_matching_ldpc_rx_simd(Tbslbrm, BG, Z, d, soft_input, C, rvidx, clear, E, F, Foffset);
-    return 0;
+    return nr_rate_matching_ldpc_rx_simd(Tbslbrm, BG, Z, d, soft_input, C, rvidx, clear, E, F, Foffset);
   }
 
   if (C == 0) {
