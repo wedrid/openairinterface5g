@@ -111,6 +111,7 @@ one_measurement_t test_ldpc(short max_iterations,
   double sigma;
   sigma = 1.0 / sqrt(2 * SNR);
   cpu_meas_enabled = 1;
+  memset(estimated_output, 0, sizeof(*estimated_output) * n_segments * Kprime);
 #ifdef LDPC_CUDA
   uint8_t **test_input, *test_input_p;
 #else
