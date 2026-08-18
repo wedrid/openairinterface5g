@@ -148,6 +148,7 @@ void cuda_support_init() {
   cuda_support_set=1;
 }
 
+pthread_mutex_t encoder_mutex = PTHREAD_MUTEX_INITIALIZER;
 uint32_t **LDPCencoder32(uint8_t **input, encoder_implemparams_t *impp)
 {
   //set_log(PHY, 4);
@@ -173,6 +174,8 @@ uint32_t **LDPCencoder32(uint8_t **input, encoder_implemparams_t *impp)
   int n_inputs = (impp->n_segments/32)+(((impp->n_segments&31) > 0) ? 1: 0);
 //  uint32_t  cc[4][22*Zc]; //padded input, unpacked, max size
 
+  int ret = pthread_mutex_lock(&encoder_mutex);
+  AssertFatal(ret == 0, "pthread_mutex_lock(): ret %d, errno %d, %s\n", ret, errno, strerror(errno));
   if (!pageable&&!integrated) { // this means we are not on shared memory
     for (int r=0;r<impp->n_segments;r++) {
         cudaMemcpyAsync(input_devh[r],input[r],block_length>>3,cudaMemcpyHostToDevice,encoderStreams[encoder_stream]);
@@ -188,6 +191,8 @@ uint32_t **LDPCencoder32(uint8_t **input, encoder_implemparams_t *impp)
   }
   cudaStreamSynchronize(encoderStreams[encoder_stream]);
   if(impp->tparity != NULL) stop_meas(impp->tparity);
+  ret = pthread_mutex_unlock(&encoder_mutex);
+  AssertFatal(ret == 0, "pthread_mutex_unlock(): ret %d, errno %d, %s\n", ret, errno, strerror(errno));
   
   return d_host;
 }
