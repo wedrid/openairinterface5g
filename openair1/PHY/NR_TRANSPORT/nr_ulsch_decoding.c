@@ -52,7 +52,8 @@ void free_gNB_ulsch(NR_gNB_ULSCH_t *ulsch, uint16_t N_RB_UL)
       ulsch->harq_process->b = NULL;
     }
 #ifdef LDPC_CUDA
-    // TODO
+    cudaFreeHost(ulsch->harq_process->c);
+    cudaFreeHost(ulsch->harq_process->d);
 #else
     free_and_zero(ulsch->harq_process->c);
     free_and_zero(ulsch->harq_process->d);

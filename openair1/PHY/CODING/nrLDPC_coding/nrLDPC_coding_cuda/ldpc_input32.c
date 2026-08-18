@@ -356,7 +356,7 @@ void ldpc_input32(uint8_t **input, uint32_t **c, int n_inputs, int n_segments) {
   else if (n_segments <= 128) {
      j0=32; j1=32; j2=32;
      j3=n_segments-96;
-  }
+  } // else ??
   uint32x4_t *ccp,cc0,cc1,cc2,cc3,cc4,cc5,cc6,cc7;
   for (int i=0; i < 264; i++,i2+=8) {
     in = vdupq_n_u32(((uint32_t*)input[0])[i]);

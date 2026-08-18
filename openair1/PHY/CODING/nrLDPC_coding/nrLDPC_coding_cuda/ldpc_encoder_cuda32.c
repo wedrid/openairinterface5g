@@ -36,7 +36,7 @@ uint32_t **d_host;
 uint32_t *d_devh[4];
 uint32_t *input_dev;
 uint32_t **input_host;
-uint32_t *input_devh[128];
+uint32_t *input_devh[144];
 int managed = 0, concurrent = 0, uva = 0, pageable = 0, pageable_uses_host = 0, register_host = 0, integrated = 0;
 
 int cuda_support_set = 0;
@@ -95,17 +95,17 @@ void cuda_support_init() {
     }
     err=cudaMemcpy(d_dev,d_devh,4*sizeof(uint32_t*),cudaMemcpyHostToDevice);
     AssertFatal(err == cudaSuccess,"CUDA Error (memcpy d_devh -> d_dev): %s\n", cudaGetErrorString(err));
-    err=cudaMalloc((void**)&input_dev,128*sizeof(uint8_t*));
+    err=cudaMalloc((void**)&input_dev,144*sizeof(uint8_t*));
     AssertFatal(err == cudaSuccess,"CUDA Error: %s\n", cudaGetErrorString(err));
-    err=cudaHostAlloc((void **)&input_host,128*sizeof(uint8_t*),cudaHostAllocDefault);
+    err=cudaHostAlloc((void **)&input_host,144*sizeof(uint8_t*),cudaHostAllocDefault);
     AssertFatal(err == cudaSuccess,"CUDA Error (cc_host): %s\n", cudaGetErrorString(err));
-    for (int i=0;i<128;i++) {
+    for (int i=0;i<144;i++) {
       err=cudaMalloc((void**)&input_devh[i],(8448/8)*sizeof(uint8_t));
       AssertFatal(err == cudaSuccess,"CUDA Error (input_devh[%d]: %s\n", i,cudaGetErrorString(err));
       err=cudaHostAlloc((void**)&input_host[i],(8448/8)*sizeof(uint8_t),cudaHostAllocDefault);
       AssertFatal(err == cudaSuccess,"CUDA Error (input_host[%d]): %s\n", i,cudaGetErrorString(err));
     }
-    err=cudaMemcpy(input_dev,input_devh,128*sizeof(uint8_t*),cudaMemcpyHostToDevice);
+    err=cudaMemcpy(input_dev,input_devh,144*sizeof(uint8_t*),cudaMemcpyHostToDevice);
     AssertFatal(err == cudaSuccess,"CUDA Error (memcpy cc_devh -> d_dev): %s\n", cudaGetErrorString(err));
   }
   else {
@@ -137,7 +137,7 @@ void cuda_support_init() {
     }
     err=cudaMemcpy(d_dev,d_devh,4*sizeof(uint32_t*),cudaMemcpyHostToDevice);
     AssertFatal(err == cudaSuccess,"CUDA Error (memcpy d_devh -> d_dev): %s\n", cudaGetErrorString(err));
-    err=cudaHostAlloc((void **)&input_host,128*sizeof(uint8_t*),cudaHostAllocMapped);
+    err=cudaHostAlloc((void **)&input_host,144*sizeof(uint8_t*),cudaHostAllocMapped);
     AssertFatal(err == cudaSuccess,"CUDA Error (input_host): %s\n", cudaGetErrorString(err));
     err=cudaHostGetDevicePointer((void**)&input_dev, input_host, 0);
     AssertFatal(err == cudaSuccess,"CUDA Error cudaHostGetDevicePointer(cc_host): %s\n", cudaGetErrorString(err));
