@@ -37,7 +37,6 @@
 #include "nrLDPC_CUDA_shared_param.h"
 
 extern cudaStream_t decoderStreams[MAX_NUM_NR_DLSCH_SEGMENTS_PER_LAYER * 4];
-extern cudaEvent_t decoderDoneEvents[MAX_NUM_NR_DLSCH_SEGMENTS_PER_LAYER * 4];
 static bool decoder_streamsCreated = false;
 static volatile int cuda_graph_breaker = 0;// 0 by default to enable the CUDA graph
 cudaError_t Err;
@@ -393,7 +392,6 @@ int32_t LDPCinit_cuda()
   if (!decoder_streamsCreated) {
     for (int s = 0; s < 8; ++s) {
       cudaStreamCreateWithFlags(&decoderStreams[s], cudaStreamNonBlocking);
-      cudaEventCreate(&decoderDoneEvents[s]);
     }
     decoder_streamsCreated = true;
   }
@@ -437,7 +435,6 @@ int32_t LDPCshutdown_cuda()
 
   for (int s = 0; s < 8; ++s) {
     if (decoder_streamsCreated) {
-      cudaEventDestroy(decoderDoneEvents[s]);
       cudaStreamDestroy(decoderStreams[s]);
     }
   }

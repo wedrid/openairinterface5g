@@ -35,7 +35,6 @@
 #define USE_GPU_FOR_RM_DEINTER 1
 
 cudaStream_t decoderStreams[MAX_NUM_NR_DLSCH_SEGMENTS_PER_LAYER * 4];
-cudaStream_t decoderDoneEvents[MAX_NUM_NR_DLSCH_SEGMENTS_PER_LAYER * 4];
 
 int d_array_size = 0;
 
