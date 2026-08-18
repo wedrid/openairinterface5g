@@ -424,6 +424,7 @@ int main(int argc, char **argv)
 
   NR_gNB_ULSCH_t *ulsch_gNB = &gNB->ulsch[UE_id];
   NR_UL_gNB_HARQ_t *harq_process_gNB = ulsch_gNB->harq_process;
+  ulsch_gNB->harq_pid = 0;
   nfapi_nr_pusch_pdu_t *rel15_ul = &harq_process_gNB->ulsch_pdu;
   NR_gNB_PUSCH *pusch_vars = &gNB->pusch_vars[UE_id];
 
