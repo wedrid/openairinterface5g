@@ -454,15 +454,17 @@ void nr_init_ul_harq_processes(NR_UL_UE_HARQ_t harq_list[NR_MAX_HARQ_PROCESSES],
     size_t total_c_size = a_segments * 8448;
     size_t total_d_size = a_segments * 68 * 384 * sizeof(uint32_t);
 
-    AssertFatal(cudaHostAlloc((void **)&tmp_c, total_c_size, cudaHostAllocMapped) == cudaSuccess, "CUDA Data Alloc c failed\n");
-    AssertFatal(cudaHostAlloc((void **)&tmp_d, total_d_size, cudaHostAllocMapped) == cudaSuccess, "CUDA Data Alloc d failed\n");
+    cudaError_t err = cudaHostAlloc((void **)&tmp_c, total_c_size, cudaHostAllocMapped);
+    AssertFatal(err == cudaSuccess, "cudaHostAlloc() tmp_c: %s\n", cudaGetErrorString(err));
+    err = cudaHostAlloc((void **)&tmp_d, total_d_size, cudaHostAllocMapped);
+    AssertFatal(err == cudaSuccess, "cudaHostAlloc() tmp_d: %s\n", cudaGetErrorString(err));
     memset(tmp_c, 0, total_c_size);
     memset(tmp_d, 0, total_d_size);
 
-    AssertFatal(cudaHostAlloc((void **)&harq_list[i].c, a_segments * sizeof(uint8_t *), cudaHostAllocMapped) == cudaSuccess,
-                "CUDA Pointer Alloc c failed\n");
-    AssertFatal(cudaHostAlloc((void **)&harq_list[i].d, a_segments * sizeof(uint8_t *), cudaHostAllocMapped) == cudaSuccess,
-                "CUDA Pointer Alloc d failed\n");
+    err = cudaHostAlloc((void **)&harq_list[i].c, a_segments * sizeof(uint8_t *), cudaHostAllocMapped);
+    AssertFatal(err == cudaSuccess, "cudaHostAlloc() harq.c: %s\n", cudaGetErrorString(err));
+    err = cudaHostAlloc((void **)&harq_list[i].d, a_segments * sizeof(uint8_t *), cudaHostAllocMapped);
+    AssertFatal(err == cudaSuccess, "cudaHostAlloc() harq.d: %s\n", cudaGetErrorString(err));
 
     for (int r = 0; r < a_segments; r++) {
       harq_list[i].c[r] = tmp_c + (r * 8448);

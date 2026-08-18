@@ -177,8 +177,10 @@ void init_decoder_warmup()
   size_t output_size_bytes = 8448 * max_n_segs * sizeof(int8_t);
 
   // Allocate Pinned/Mapped Memory for Zero-Copy access (GH200 friendly)
-  cudaHostAlloc((void**)&dummy_input_llr, input_size_bytes, cudaHostAllocMapped);
-  cudaHostAlloc((void**)&dummy_output_bits, output_size_bytes, cudaHostAllocMapped);
+  cudaError_t err = cudaHostAlloc((void**)&dummy_input_llr, input_size_bytes, cudaHostAllocMapped);
+  AssertFatal(err == cudaSuccess, "cudaHostAlloc() dummy_input_llr: %s\n", cudaGetErrorString(err));
+  err = cudaHostAlloc((void**)&dummy_output_bits, output_size_bytes, cudaHostAllocMapped);
+  AssertFatal(err == cudaSuccess, "cudaHostAlloc() dummy_output_bits: %s\n", cudaGetErrorString(err));
 
   memset(dummy_input_llr, 0, input_size_bytes);
   memset(dummy_output_bits, 0, output_size_bytes);
@@ -325,7 +327,8 @@ void init_decoder_gpu_structures()
   // Bridge for graphs
   for (int i = 0; i < MAX_GRAPH_CACHE_SIZE; i++) {
     if (gpu_graph_cache[i].bridge_ptr == NULL) {
-      cudaHostAlloc((void**)&gpu_graph_cache[i].bridge_ptr, sizeof(ldpc_cuda_bridge_t), cudaHostAllocMapped);
+      cudaError_t err  = cudaHostAlloc((void**)&gpu_graph_cache[i].bridge_ptr, sizeof(ldpc_cuda_bridge_t), cudaHostAllocMapped);
+      AssertFatal(err == cudaSuccess, "cudaHostAlloc() gpu_graph_cache: %s\n", cudaGetErrorString(err));
 
       gpu_graph_cache[i].bridge_ptr->p_llr_ptr = NULL;
       gpu_graph_cache[i].bridge_ptr->p_out_ptr = NULL;
@@ -336,7 +339,8 @@ void init_decoder_gpu_structures()
   // Bridge for normal execute
   for (int i = 0; i < 8; i++) {
     if (stream_bridges[i] == NULL) {
-      cudaHostAlloc((void**)&stream_bridges[i], sizeof(ldpc_cuda_bridge_t), cudaHostAllocMapped);
+      cudaError_t err = cudaHostAlloc((void**)&stream_bridges[i], sizeof(ldpc_cuda_bridge_t), cudaHostAllocMapped);
+      AssertFatal(err == cudaSuccess, "cudaHostAlloc() stream_bridges: %s\n", cudaGetErrorString(err));
       stream_bridges[i]->p_llr_ptr = NULL;
       stream_bridges[i]->p_out_ptr = NULL;
     }

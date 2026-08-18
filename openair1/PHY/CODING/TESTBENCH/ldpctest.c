@@ -592,10 +592,7 @@ int main(int argc, char *argv[])
   Zc = 0;
 #ifdef LDPC_CUDA
   cudaError_t err = cudaHostAlloc((void **)&estimated_output, sizeof(uint8_t) * n_segments * Kprime, cudaHostAllocMapped);
-  if (err != cudaSuccess) {
-    printf("[DEBUG] CUDA Error String: %s\n", cudaGetErrorString(err));
-  }
-  AssertFatal(err == cudaSuccess, "estimated_output n_segments %d Kprime %d\n", n_segments, Kprime);
+  AssertFatal(err == cudaSuccess, "cudaHostAlloc() estimated_output n_segments %d Kprime %d\n", n_segments, Kprime);
   err = cudaHostAlloc((void **)&channel_output_fixed, sizeof(int8_t) * n_segments * 68 * 384, cudaHostAllocMapped);
   AssertFatal(err == cudaSuccess, "channel_output_fixed n_segments %d\n", n_segments);
   if (use32bit == 1) {
