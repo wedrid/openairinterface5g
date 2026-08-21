@@ -205,6 +205,21 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
     harq_process->K = TB_parameters->K;
     harq_process->Z = TB_parameters->Z;
     harq_process->F = TB_parameters->F;
+    LOG_I(PHY,
+      "LDPC_WORKLOAD frame=%d slot=%d A=%d MCS=%d NPRB=%d Qm=%d R=%.4f BG=%d C=%d K=%d Zc=%d F=%d G=%d\n",
+      frame,
+      nr_tti_rx,
+      TB_parameters->A,
+      TB_parameters->mcs,
+      TB_parameters->nb_rb,
+      TB_parameters->Qm,
+      pusch_pdu->target_code_rate / 10240.0f,
+      TB_parameters->BG,
+      TB_parameters->C,
+      TB_parameters->K,
+      TB_parameters->Z,
+      TB_parameters->F,
+      TB_parameters->G);
 
     uint16_t a_segments = MAX_NUM_NR_ULSCH_SEGMENTS_PER_LAYER * TB_parameters->nb_layers; // number of segments to be allocated
     if (TB_parameters->C > a_segments) {
