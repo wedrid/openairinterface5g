@@ -22,6 +22,12 @@
 #include "bits.h"
 #include "common/utils/LOG/log.h"
 #include <syscall.h>
+#include <time.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <limits.h>
 // #define DEBUG_ULSCH_DECODING
 // #define gNB_DEBUG_TRACE
 
@@ -36,6 +42,143 @@
 #ifdef LDPC_CUDA
 #include <cuda_runtime.h>
 #endif
+
+
+// STRUCT PER LA PROFILAZIONE DELLE CHIAMATE LDPC DECODER
+#define LDPC_TRACE_MAX 300000
+
+typedef struct {
+  uint64_t call_start_ns;
+  uint64_t decoder_start_ns;
+  uint64_t decoder_end_ns;
+  uint64_t call_end_ns;
+
+  uint64_t call_id;
+
+  uint32_t frame;
+  uint32_t A;
+  uint32_t G;
+
+  uint16_t slot;
+  uint16_t nb_pusch;
+  uint16_t pusch_id;
+  uint16_t ulsch_id;
+  uint16_t rnti;
+
+
+  uint16_t C;
+  uint16_t K;
+  uint16_t Zc;
+  uint16_t F;
+  uint16_t nb_rb;
+
+  uint16_t target_code_rate;
+
+  uint8_t mcs;
+  uint8_t Qm;
+  uint8_t BG;
+  uint8_t R;
+  uint8_t max_ldpc_iterations;
+
+  uint8_t harq_pid;
+  uint8_t harq_round;
+  uint8_t rv;
+  uint8_t success;
+
+  int32_t decoder_ret;
+} ldpc_trace_entry_t;
+
+
+static ldpc_trace_entry_t ldpc_trace[LDPC_TRACE_MAX];
+
+static _Atomic uint32_t ldpc_trace_count = 0;
+static _Atomic uint64_t ldpc_call_count = 0;
+
+
+static inline uint64_t ldpc_trace_now_ns(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+
+  return ((uint64_t)ts.tv_sec * 1000000000ULL)
+       + (uint64_t)ts.tv_nsec;
+}
+
+static void ldpc_trace_dump(void)
+{
+  const char *path = getenv("LDPC_TRACE_FILE");
+
+  if (!path)
+    path = "/tmp/ldpc_trace.csv";
+
+  FILE *f = fopen(path, "w");
+
+  if (!f)
+    return;
+
+  fprintf(f,
+          "call_id,"
+          "call_start_ns,decoder_start_ns,decoder_end_ns,call_end_ns,"
+          "frame,slot,nb_pusch,pusch_id,ulsch_id,rnti,"
+          "A,G,MCS,NPRB,Qm,BG,C,K,Zc,F,"
+          "target_code_rate,R,max_ldpc_iterations,"
+          "harq_pid,harq_round,rv,success,decoder_ret\n");
+
+  uint32_t total_seen = atomic_load(&ldpc_trace_count);
+
+  uint32_t count = total_seen;
+  if (count > LDPC_TRACE_MAX)
+    count = LDPC_TRACE_MAX;
+
+  for (uint32_t i = 0; i < count; i++) {
+    ldpc_trace_entry_t *e = &ldpc_trace[i];
+
+    fprintf(f,
+            "%lu,%lu,%lu,%lu,%lu,"
+            "%u,%u,%u,%u,%u,%u,"
+            "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,"
+            "%u,%u,%u,"
+            "%u,%u,%u,%u,%d\n",
+            e->call_id,
+            e->call_start_ns,
+            e->decoder_start_ns,
+            e->decoder_end_ns,
+            e->call_end_ns,
+            e->frame,
+            e->slot,
+            e->nb_pusch,
+            e->pusch_id,
+            e->ulsch_id,
+            e->rnti,
+            e->A,
+            e->G,
+            e->mcs,
+            e->nb_rb,
+            e->Qm,
+            e->BG,
+            e->C,
+            e->K,
+            e->Zc,
+            e->F,
+            e->target_code_rate,
+            e->R,
+            e->max_ldpc_iterations,
+            e->harq_pid,
+            e->harq_round,
+            e->rv,
+            e->success,
+            e->decoder_ret);
+  }
+
+  fclose(f);
+
+  fprintf(stderr,
+        "\nLDPC trace: wrote %u entries to %s (%u observed, %u dropped)\n",
+        count,
+        path,
+        total_seen,
+        total_seen > count ? total_seen - count : 0);
+}
 
 void free_gNB_ulsch(NR_gNB_ULSCH_t *ulsch, uint16_t N_RB_UL)
 {
@@ -63,7 +206,18 @@ void free_gNB_ulsch(NR_gNB_ULSCH_t *ulsch, uint16_t N_RB_UL)
 }
 
 NR_gNB_ULSCH_t new_gNB_ulsch(uint8_t max_ldpc_iterations, uint16_t N_RB_UL)
-{
+{ 
+  // START for ldpc time profile (edo)
+  static atomic_bool trace_dump_registered = false;
+
+  bool expected = false;
+
+  if (atomic_compare_exchange_strong(&trace_dump_registered,
+                                    &expected,
+                                    true)) {
+    atexit(ldpc_trace_dump);
+  }
+  // END for ldpc time profile (edo)
   uint16_t a_segments = MAX_NUM_NR_ULSCH_SEGMENTS; // number of segments to be allocated
 
   if (N_RB_UL != 273) {
@@ -103,6 +257,17 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
                       int *ULSCH_ids,
                       int nb_pusch)
 {
+  // START for ldpc time profile (edo)
+  uint64_t trace_call_start_ns = ldpc_trace_now_ns();
+
+  uint64_t trace_call_id =
+      atomic_fetch_add(&ldpc_call_count, 1);
+
+  uint32_t trace_indices[nb_pusch];
+
+  for (int i = 0; i < nb_pusch; i++)
+    trace_indices[i] = UINT32_MAX;
+  // END for ldpc time profile (edo)  
   nrLDPC_TB_decoding_parameters_t TBs[nb_pusch];
   memset(TBs, 0, sizeof(TBs));
   nrLDPC_slot_decoding_parameters_t slot_parameters = {.frame = frame,
@@ -205,21 +370,6 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
     harq_process->K = TB_parameters->K;
     harq_process->Z = TB_parameters->Z;
     harq_process->F = TB_parameters->F;
-    LOG_I(PHY,
-      "LDPC_WORKLOAD frame=%d slot=%d A=%d MCS=%d NPRB=%d Qm=%d R=%.4f BG=%d C=%d K=%d Zc=%d F=%d G=%d\n",
-      frame,
-      nr_tti_rx,
-      TB_parameters->A,
-      TB_parameters->mcs,
-      TB_parameters->nb_rb,
-      TB_parameters->Qm,
-      pusch_pdu->target_code_rate / 10240.0f,
-      TB_parameters->BG,
-      TB_parameters->C,
-      TB_parameters->K,
-      TB_parameters->Z,
-      TB_parameters->F,
-      TB_parameters->G);
 
     uint16_t a_segments = MAX_NUM_NR_ULSCH_SEGMENTS_PER_LAYER * TB_parameters->nb_layers; // number of segments to be allocated
     if (TB_parameters->C > a_segments) {
@@ -302,9 +452,84 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
         break;
       }
     }
-  }
+    /* ---------- START EDO LDPC TRACE: one entry for this TB ---------- */
 
-  int ret_decoder = phy_vars_gNB->nrLDPC_coding_interface.nrLDPC_coding_decoder(&slot_parameters);
+    uint32_t trace_idx =
+    atomic_fetch_add(&ldpc_trace_count, 1);
+
+    if (trace_idx < LDPC_TRACE_MAX) {
+
+      trace_indices[pusch_id] = trace_idx;
+
+      ldpc_trace_entry_t *e = &ldpc_trace[trace_idx];
+
+      e->call_id = trace_call_id;
+      e->call_start_ns = trace_call_start_ns;
+
+      e->frame = frame;
+      e->slot = nr_tti_rx;
+      e->nb_pusch = nb_pusch;
+
+      e->pusch_id = pusch_id;
+      e->ulsch_id = ULSCH_id;
+
+      e->rnti = ulsch->rnti;
+
+      e->A = TB_parameters->A;
+      e->G = TB_parameters->G;
+
+      e->mcs = TB_parameters->mcs;
+      e->nb_rb = TB_parameters->nb_rb;
+      e->Qm = TB_parameters->Qm;
+
+      e->BG = TB_parameters->BG;
+      e->C = TB_parameters->C;
+      e->K = TB_parameters->K;
+      e->Zc = TB_parameters->Z;
+      e->F = TB_parameters->F;
+
+
+      e->target_code_rate =
+          harq_process->ulsch_pdu.target_code_rate;
+
+      e->R = TB_parameters->R;
+      e->max_ldpc_iterations = TB_parameters->max_ldpc_iterations;
+
+      e->harq_pid = ulsch->harq_pid;
+      e->harq_round = harq_process->round;
+      e->rv = TB_parameters->rv_index;
+
+      e->success = 0;
+    }
+    /* ---------- END EDO LDPC TRACE: one entry for this TB ---------- */
+    
+
+
+  }
+  
+
+
+  // original code, replaced by edo for profiling //int ret_decoder = phy_vars_gNB->nrLDPC_coding_interface.nrLDPC_coding_decoder(&slot_parameters);
+  // START edo for ldpc profiling
+  uint64_t trace_decoder_start_ns = ldpc_trace_now_ns();
+
+  int ret_decoder =
+      phy_vars_gNB->nrLDPC_coding_interface.nrLDPC_coding_decoder(&slot_parameters);
+
+  uint64_t trace_decoder_end_ns = ldpc_trace_now_ns();
+  for (int i = 0; i < nb_pusch; i++) {
+
+    uint32_t idx = trace_indices[i];
+
+    if (idx != UINT32_MAX) {
+      ldpc_trace[idx].decoder_start_ns =
+          trace_decoder_start_ns;
+
+      ldpc_trace[idx].decoder_end_ns =
+          trace_decoder_end_ns;
+    }
+  }
+  // END edo for ldpc profiling
   // post decode
   for (uint8_t pusch_id = 0; pusch_id < nb_pusch; pusch_id++) {
     uint8_t ULSCH_id = ULSCH_ids[pusch_id];
@@ -327,6 +552,11 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
       r_offset += (harq_process->K >> 3);
     }
     bool crcok = (harq_process->processedSegments == TB_parameters->C);
+    uint32_t idx = trace_indices[pusch_id];
+
+    if (idx != UINT32_MAX)
+      ldpc_trace[idx].success = crcok ? 1 : 0;
+
     if (!crcok)
       LOG_D(PHY, "ULSCH %d in error\n", ULSCH_id);
     merge_meas(&phy_vars_gNB->ts_deinterleave, &TB_parameters->ts_deinterleave);
@@ -334,6 +564,20 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
     merge_meas(&phy_vars_gNB->ts_seg_prep, &TB_parameters->ts_seg_prep);
     merge_meas(&phy_vars_gNB->ts_ldpc_decode, &TB_parameters->ts_ldpc_decode);
     harq_process->harq_to_be_cleared = false;
+  }
+  uint64_t trace_call_end_ns = ldpc_trace_now_ns();
+
+  for (int i = 0; i < nb_pusch; i++) {
+
+    uint32_t idx = trace_indices[i];
+
+    if (idx != UINT32_MAX) {
+      ldpc_trace[idx].call_end_ns =
+          trace_call_end_ns;
+
+      ldpc_trace[idx].decoder_ret =
+          ret_decoder;
+    }
   }
 
   return ret_decoder;
