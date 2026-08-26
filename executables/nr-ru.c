@@ -11,6 +11,10 @@
 #include <linux/sched.h>
 #include <sys/sysinfo.h>
 #include <math.h>
+#include <stdint.h>
+#include <stdatomic.h>
+#include <inttypes.h>
+#include <time.h>
 
 #include "common/utils/nr/nr_common.h"
 #include "common/utils/assertions.h"
@@ -46,6 +50,92 @@ static int DEFRUTPCORES[] = {-1,-1,-1,-1};
 #include "nfapi_interface.h"
 #include <nfapi/oai_integration/vendor_ext.h>
 #include "executables/nr-softmodem-common.h"
+
+#define RU_WAIT_TRACE_MAX 500000
+
+typedef struct {
+  uint64_t wait_start_ns;
+  uint64_t wait_end_ns;
+
+  int frame_rx;
+  int slot_rx;
+  int buffer_idx;
+
+  int released_frame_rx;
+  int released_slot_rx;
+} ru_wait_trace_entry_t;
+
+static ru_wait_trace_entry_t ru_wait_trace[RU_WAIT_TRACE_MAX];
+
+static _Atomic uint32_t ru_wait_trace_count = 0;
+static _Atomic int ru_wait_atexit_registered = 0;
+
+static inline uint64_t ru_wait_now_ns(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+
+  return ((uint64_t)ts.tv_sec * 1000000000ULL)
+       + (uint64_t)ts.tv_nsec;
+}
+
+static void ru_wait_trace_dump(void)
+{
+  const char *prefix = getenv("GNB_TIMELINE_PREFIX");
+
+  if (prefix == NULL || prefix[0] == '\0')
+    prefix = "/tmp/gnb_timeline";
+
+  char path[512];
+  snprintf(path, sizeof(path), "%s_ru_wait.csv", prefix);
+
+  FILE *f = fopen(path, "w");
+
+  if (f == NULL) {
+    fprintf(stderr, "RU wait trace: could not open %s\n", path);
+    return;
+  }
+
+  fprintf(f,
+          "wait_start_ns,wait_end_ns,"
+          "frame_rx,slot_rx,buffer_idx,"
+          "released_frame_rx,released_slot_rx\n");
+
+  uint32_t n = atomic_load(&ru_wait_trace_count);
+
+  if (n > RU_WAIT_TRACE_MAX)
+    n = RU_WAIT_TRACE_MAX;
+
+  for (uint32_t i = 0; i < n; i++) {
+    const ru_wait_trace_entry_t *e = &ru_wait_trace[i];
+
+    fprintf(f,
+            "%" PRIu64 ",%" PRIu64 ","
+            "%d,%d,%d,%d,%d\n",
+            e->wait_start_ns,
+            e->wait_end_ns,
+            e->frame_rx,
+            e->slot_rx,
+            e->buffer_idx,
+            e->released_frame_rx,
+            e->released_slot_rx);
+  }
+
+  fclose(f);
+
+  fprintf(stderr,
+          "RU wait trace: wrote %u entries to %s\n",
+          n,
+          path);
+
+  uint32_t observed = atomic_load(&ru_wait_trace_count);
+
+  if (observed > RU_WAIT_TRACE_MAX) {
+    fprintf(stderr,
+            "RU wait trace: dropped %u entries\n",
+            observed - RU_WAIT_TRACE_MAX);
+  }
+}
 
 static void NRRCconfig_RU(configmodule_interface_t *cfg);
 
@@ -591,20 +681,69 @@ static bool wait_free_rx_tti(notifiedFIFO_t *L1_rx_out, bool rx_tti_busy[RU_RX_S
 {
   int idx = slot_rx % RU_RX_SLOT_DEPTH;
   if (rx_tti_busy[idx]) {
+
+    uint64_t wait_start_ns = ru_wait_now_ns();
+
+    int released_frame_rx = -1;
+    int released_slot_rx = -1;
+
     bool not_done = true;
-    LOG_D(NR_PHY, "%d.%d Waiting to access RX slot %d\n", frame_rx, slot_rx, idx);
+
+    LOG_D(NR_PHY,
+          "%d.%d Waiting to access RX slot %d\n",
+          frame_rx,
+          slot_rx,
+          idx);
+
     // block and wait for frame_rx/slot_rx free from previous slot processing.
     // as we can get other slots, we loop on the queue
     while (not_done) {
+
       notifiedFIFO_elt_t *res = pullNotifiedFIFO(L1_rx_out);
+
       if (!res)
         return false;
+
       processingData_L1_t *info = NotifiedFifoData(res);
-      LOG_D(NR_PHY, "%d.%d Got access to RX slot %d.%d (%d)\n", frame_rx, slot_rx, info->frame_rx, info->slot_rx, idx);
+
+      LOG_D(NR_PHY,
+            "%d.%d Got access to RX slot %d.%d (%d)\n",
+            frame_rx,
+            slot_rx,
+            info->frame_rx,
+            info->slot_rx,
+            idx);
+
       rx_tti_busy[info->slot_rx % RU_RX_SLOT_DEPTH] = false;
-      if ((info->slot_rx % RU_RX_SLOT_DEPTH) == idx)
+
+      if ((info->slot_rx % RU_RX_SLOT_DEPTH) == idx) {
+        released_frame_rx = info->frame_rx;
+        released_slot_rx = info->slot_rx;
         not_done = false;
+      }
+
       delNotifiedFIFO_elt(res);
+    }
+
+    uint64_t wait_end_ns = ru_wait_now_ns();
+
+    uint32_t trace_idx =
+        atomic_fetch_add(&ru_wait_trace_count, 1);
+
+    if (trace_idx < RU_WAIT_TRACE_MAX) {
+
+      ru_wait_trace_entry_t *e =
+          &ru_wait_trace[trace_idx];
+
+      e->wait_start_ns = wait_start_ns;
+      e->wait_end_ns = wait_end_ns;
+
+      e->frame_rx = frame_rx;
+      e->slot_rx = slot_rx;
+      e->buffer_idx = idx;
+
+      e->released_frame_rx = released_frame_rx;
+      e->released_slot_rx = released_slot_rx;
     }
   }
   // set the tti to busy: the caller will process this slot now
@@ -614,6 +753,11 @@ static bool wait_free_rx_tti(notifiedFIFO_t *L1_rx_out, bool rx_tti_busy[RU_RX_S
 
 void *ru_thread(void *param)
 {
+
+  if (atomic_exchange(&ru_wait_atexit_registered, 1) == 0) {
+    atexit(ru_wait_trace_dump);
+  }
+
   static int ru_thread_status;
   RU_t               *ru      = (RU_t *)param;
   RU_proc_t          *proc    = &ru->proc;

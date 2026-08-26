@@ -9,9 +9,12 @@
 #define _GNU_SOURCE
 #undef MALLOC //there are two conflicting definitions, so we better make sure we don't use it at all
 
+#include <inttypes.h>
+#include <stdlib.h>
 #include <fcntl.h> // for SEEK_SET
 #include <pthread.h> // for pthread_join
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -45,6 +48,191 @@
 
 #define TICK_TO_US(ts) (ts.trials==0?0:ts.diff/ts.trials)
 #define L1STATSSTRLEN 16384
+#define GNB_TIMELINE_MAX 500000
+
+typedef struct {
+  uint64_t sched_start_ns;
+  uint64_t sched_end_ns;
+
+  int frame_tx;
+  int slot_tx;
+
+  int frame_rx;
+  int slot_rx;
+} gnb_tx_timeline_entry_t;
+
+typedef struct {
+  uint64_t rx_func_start_ns;
+
+  uint64_t phy_start_ns;
+  uint64_t phy_end_ns;
+
+  uint64_t ul_ind_start_ns;
+  uint64_t ul_ind_end_ns;
+
+  uint64_t l1_complete_ns;
+
+  int frame_rx;
+  int slot_rx;
+} gnb_rx_timeline_entry_t;
+
+static gnb_tx_timeline_entry_t gnb_tx_timeline[GNB_TIMELINE_MAX];
+static gnb_rx_timeline_entry_t gnb_rx_timeline[GNB_TIMELINE_MAX];
+
+static uint64_t gnb_start_mono_ns = 0;
+static uint64_t gnb_start_realtime_ns = 0;
+
+static uint64_t gnb_end_mono_ns = 0;
+static uint64_t gnb_end_realtime_ns = 0;
+
+static _Atomic uint32_t gnb_tx_timeline_count = 0;
+static _Atomic uint32_t gnb_rx_timeline_count = 0;
+static _Atomic int gnb_timeline_atexit_registered = 0;
+
+static inline uint64_t gnb_timeline_now_ns(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+
+  return ((uint64_t)ts.tv_sec * 1000000000ULL)
+       + (uint64_t)ts.tv_nsec;
+}
+
+static inline uint64_t gnb_realtime_now_ns(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+
+  return ((uint64_t)ts.tv_sec * 1000000000ULL)
+       + (uint64_t)ts.tv_nsec;
+}
+
+static void gnb_timeline_dump(void)
+{
+  gnb_end_mono_ns = gnb_timeline_now_ns();
+  gnb_end_realtime_ns = gnb_realtime_now_ns();
+  const char *prefix = getenv("GNB_TIMELINE_PREFIX");
+  if (prefix == NULL || prefix[0] == '\0')
+    prefix = "/tmp/gnb_timeline";
+
+  char tx_path[512];
+  char rx_path[512];
+  char clock_path[512];
+
+  snprintf(tx_path, sizeof(tx_path), "%s_tx.csv", prefix);
+  snprintf(rx_path, sizeof(rx_path), "%s_rx.csv", prefix);
+  snprintf(clock_path, sizeof(clock_path), "%s_clock.csv", prefix);
+
+  /* ---------------- TX / scheduler timeline ---------------- */
+
+  FILE *txf = fopen(tx_path, "w");
+  if (txf != NULL) {
+    fprintf(txf,
+            "sched_start_ns,sched_end_ns,"
+            "frame_tx,slot_tx,frame_rx,slot_rx\n");
+
+    uint32_t n_tx = atomic_load(&gnb_tx_timeline_count);
+    if (n_tx > GNB_TIMELINE_MAX)
+      n_tx = GNB_TIMELINE_MAX;
+
+    for (uint32_t i = 0; i < n_tx; i++) {
+      const gnb_tx_timeline_entry_t *e = &gnb_tx_timeline[i];
+
+      fprintf(txf,
+              "%" PRIu64 ",%" PRIu64 ","
+              "%d,%d,%d,%d\n",
+              e->sched_start_ns,
+              e->sched_end_ns,
+              e->frame_tx,
+              e->slot_tx,
+              e->frame_rx,
+              e->slot_rx);
+    }
+
+    fclose(txf);
+    fprintf(stderr, "gNB timeline: wrote %u TX entries to %s\n",
+            n_tx, tx_path);
+  } else {
+    fprintf(stderr, "gNB timeline: could not open %s\n", tx_path);
+  }
+
+  /* ---------------- RX / UL timeline ---------------- */
+
+  FILE *rxf = fopen(rx_path, "w");
+  if (rxf != NULL) {
+    fprintf(rxf,
+            "rx_func_start_ns,"
+            "phy_start_ns,phy_end_ns,"
+            "ul_ind_start_ns,ul_ind_end_ns,"
+            "l1_complete_ns,"
+            "frame_rx,slot_rx\n");
+
+    uint32_t n_rx = atomic_load(&gnb_rx_timeline_count);
+    if (n_rx > GNB_TIMELINE_MAX)
+      n_rx = GNB_TIMELINE_MAX;
+
+    for (uint32_t i = 0; i < n_rx; i++) {
+      const gnb_rx_timeline_entry_t *e = &gnb_rx_timeline[i];
+
+      fprintf(rxf,
+              "%" PRIu64 ","
+              "%" PRIu64 ",%" PRIu64 ","
+              "%" PRIu64 ",%" PRIu64 ","
+              "%" PRIu64 ","
+              "%d,%d\n",
+              e->rx_func_start_ns,
+              e->phy_start_ns,
+              e->phy_end_ns,
+              e->ul_ind_start_ns,
+              e->ul_ind_end_ns,
+              e->l1_complete_ns,
+              e->frame_rx,
+              e->slot_rx);
+    }
+
+    fclose(rxf);
+    fprintf(stderr, "gNB timeline: wrote %u RX entries to %s\n",
+            n_rx, rx_path);
+  } else {
+    fprintf(stderr, "gNB timeline: could not open %s\n", rx_path);
+  }
+
+  uint32_t observed_tx = atomic_load(&gnb_tx_timeline_count);
+  uint32_t observed_rx = atomic_load(&gnb_rx_timeline_count);
+
+  if (observed_tx > GNB_TIMELINE_MAX)
+    fprintf(stderr,
+            "gNB timeline: dropped %u TX entries\n",
+            observed_tx - GNB_TIMELINE_MAX);
+
+  if (observed_rx > GNB_TIMELINE_MAX)
+    fprintf(stderr,
+            "gNB timeline: dropped %u RX entries\n",
+            observed_rx - GNB_TIMELINE_MAX);
+
+  FILE *clockf = fopen(clock_path, "w");
+
+  if (clockf != NULL) {
+    fprintf(clockf,
+            "start_mono_ns,start_realtime_ns,"
+            "end_mono_ns,end_realtime_ns\n");
+
+    fprintf(clockf,
+            "%" PRIu64 ",%" PRIu64 ","
+            "%" PRIu64 ",%" PRIu64 "\n",
+            gnb_start_mono_ns,
+            gnb_start_realtime_ns,
+            gnb_end_mono_ns,
+            gnb_end_realtime_ns);
+
+    fclose(clockf);
+
+    fprintf(stderr,
+            "gNB timeline: wrote clock mapping to %s\n",
+            clock_path);
+  }
+}
+
 static void rx_func(processingData_L1_t *param);
 
 static void tx_func(processingData_L1tx_t *info)
@@ -53,6 +241,19 @@ static void tx_func(processingData_L1tx_t *info)
   int slot_tx = info->slot;
   int frame_rx = info->frame_rx;
   int slot_rx = info->slot_rx;
+
+  uint32_t tx_trace_idx = atomic_fetch_add(&gnb_tx_timeline_count, 1);
+  gnb_tx_timeline_entry_t *tx_trace = NULL;
+
+  if (tx_trace_idx < GNB_TIMELINE_MAX) {
+    tx_trace = &gnb_tx_timeline[tx_trace_idx];
+
+    tx_trace->frame_tx = frame_tx;
+    tx_trace->slot_tx = slot_tx;
+    tx_trace->frame_rx = frame_rx;
+    tx_trace->slot_rx = slot_rx;
+  }
+
   LOG_D(NR_PHY, "%d.%d running tx_func\n", frame_tx, slot_tx);
   PHY_VARS_gNB *gNB = info->gNB;
   NR_IF_Module_t *ifi = gNB->if_inst;
@@ -69,11 +270,20 @@ static void tx_func(processingData_L1tx_t *info)
 
   nfapi_nr_slot_indication_scf_t ind = {.sfn = frame_tx, .slot = slot_tx};
   start_meas(&gNB->slot_indication_stats);
-  // this variable is very big (multiple MB), so we put it into static storage
-  // to not overflow the stack while still having it in local (function) scope
-  // also, tx_func() is only executed by one thread, serially
+
   static NR_Sched_Rsp_t sched_response;
+
+  uint64_t sched_start_ns = gnb_timeline_now_ns();
+
   ifi->NR_slot_indication(&ind, &sched_response);
+
+  uint64_t sched_end_ns = gnb_timeline_now_ns();
+
+  if (tx_trace != NULL) {
+    tx_trace->sched_start_ns = sched_start_ns;
+    tx_trace->sched_end_ns = sched_end_ns;
+  }
+
   stop_meas(&gNB->slot_indication_stats);
 
   info->gNB = gNB;
@@ -148,6 +358,16 @@ static void rx_func(processingData_L1_t *info)
   PHY_VARS_gNB *gNB = info->gNB;
   int frame_rx = info->frame_rx;
   int slot_rx = info->slot_rx;
+  uint32_t rx_trace_idx = atomic_fetch_add(&gnb_rx_timeline_count, 1);
+  gnb_rx_timeline_entry_t *rx_trace = NULL;
+
+  if (rx_trace_idx < GNB_TIMELINE_MAX) {
+    rx_trace = &gnb_rx_timeline[rx_trace_idx];
+
+    rx_trace->frame_rx = frame_rx;
+    rx_trace->slot_rx = slot_rx;
+    rx_trace->rx_func_start_ns = gnb_timeline_now_ns();
+  }
   nfapi_nr_config_request_scf_t *cfg = &gNB->gNB_config;
 
   T(T_GNB_PHY_UL_TICK, T_INT(gNB->Mod_id), T_INT(frame_rx), T_INT(slot_rx));
@@ -187,11 +407,31 @@ static void rx_func(processingData_L1_t *info)
                                       sym);
       }
     }
+    uint64_t phy_start_ns = gnb_timeline_now_ns();
+
     phy_procedures_gNB_uespec_RX(gNB, frame_rx, slot_rx, &UL_INFO);
+
+    uint64_t phy_end_ns = gnb_timeline_now_ns();
+
+    if (rx_trace != NULL) {
+      rx_trace->phy_start_ns = phy_start_ns;
+      rx_trace->phy_end_ns = phy_end_ns;
+    }
 
     // Call the scheduler
     start_meas(&gNB->ul_indication_stats);
+
+    uint64_t ul_ind_start_ns = gnb_timeline_now_ns();
+
     gNB->if_inst->NR_UL_indication(&UL_INFO);
+
+    uint64_t ul_ind_end_ns = gnb_timeline_now_ns();
+
+    if (rx_trace != NULL) {
+      rx_trace->ul_ind_start_ns = ul_ind_start_ns;
+      rx_trace->ul_ind_end_ns = ul_ind_end_ns;
+    }
+
     stop_meas(&gNB->ul_indication_stats);
 
     notifiedFIFO_elt_t *res = newNotifiedFIFO_elt(sizeof(processingData_L1_t), 0, &gNB->L1_rx_out, NULL);
@@ -201,6 +441,9 @@ static void rx_func(processingData_L1_t *info)
     syncMsg->slot_rx = slot_rx;
     res->key = slot_rx;
     LOG_D(NR_PHY, "Signaling completion for %d.%d (mod_slot %d) on L1_rx_out\n", frame_rx, slot_rx, slot_rx % RU_RX_SLOT_DEPTH);
+    if (rx_trace != NULL) {
+      rx_trace->l1_complete_ns = gnb_timeline_now_ns();
+    }
     pushNotifiedFIFO(&gNB->L1_rx_out, res);
   }
 
@@ -315,6 +558,12 @@ void init_gNB_Tpool(int inst)
   // L1 TX result FIFO
   initNotifiedFIFO(&gNB->L1_tx_out);
   initNotifiedFIFO(&gNB->L1_rx_out);
+  if (atomic_exchange(&gnb_timeline_atexit_registered, 1) == 0) {
+    gnb_start_mono_ns = gnb_timeline_now_ns();
+    gnb_start_realtime_ns = gnb_realtime_now_ns();
+
+    atexit(gnb_timeline_dump);
+  }
 
   // create the RX thread responsible for RX processing start event (resp_L1 msg queue), then launch rx_func()
   threadCreate(&gNB->L1_rx_thread, L1_rx_thread, (void *)gNB, "L1_rx_thread", gNB->L1_rx_thread_core, OAI_PRIORITY_RT_MAX);
