@@ -22,6 +22,19 @@
 
 #include <errno.h>
 #include <string.h>
+#include <time.h>
+
+_Thread_local uint64_t gnb_sched_lock_acquired_ns_tls = 0;
+_Thread_local int gnb_ul_collect_count_tls = 0;
+_Thread_local int gnb_ul_first_target_slot_tls = -1;
+_Thread_local int gnb_ul_first_k2_tls = -1;
+
+static inline uint64_t sched_timeline_now_ns(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+  return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+}
 
 uint8_t nr_get_rv(int rel_round)
 {
@@ -138,7 +151,9 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   NR_COMMON_channels_t *cc = gNB->common_channels;
   NR_ServingCellConfigCommon_t *scc = cc->ServingCellConfigCommon;
 
+  // NR_SCHED_LOCK(&gNB->sched_lock);
   NR_SCHED_LOCK(&gNB->sched_lock);
+  gnb_sched_lock_acquired_ns_tls = sched_timeline_now_ns();
   int slots_frame = gNB->frame_structure.numb_slots_frame;
   clear_beam_information(&gNB->beam_info, frame, slot, slots_frame);
 

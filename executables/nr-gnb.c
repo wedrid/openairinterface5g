@@ -50,9 +50,20 @@
 #define L1STATSSTRLEN 16384
 #define GNB_TIMELINE_MAX 500000
 
+extern _Thread_local uint64_t gnb_sched_lock_acquired_ns_tls;
+
+extern _Thread_local int gnb_ul_collect_count_tls;
+extern _Thread_local int gnb_ul_first_target_slot_tls;
+extern _Thread_local int gnb_ul_first_k2_tls;
+
 typedef struct {
   uint64_t sched_start_ns;
+  uint64_t sched_lock_acquired_ns;
   uint64_t sched_end_ns;
+
+  int ul_collect_count;
+  int ul_first_target_slot;
+  int ul_first_k2;
 
   int frame_tx;
   int slot_tx;
@@ -128,8 +139,9 @@ static void gnb_timeline_dump(void)
   FILE *txf = fopen(tx_path, "w");
   if (txf != NULL) {
     fprintf(txf,
-            "sched_start_ns,sched_end_ns,"
-            "frame_tx,slot_tx,frame_rx,slot_rx\n");
+        "sched_start_ns,sched_lock_acquired_ns,sched_end_ns,"
+        "ul_collect_count,ul_first_target_slot,ul_first_k2,"
+        "frame_tx,slot_tx,frame_rx,slot_rx\n");
 
     uint32_t n_tx = atomic_load(&gnb_tx_timeline_count);
     if (n_tx > GNB_TIMELINE_MAX)
@@ -139,15 +151,20 @@ static void gnb_timeline_dump(void)
       const gnb_tx_timeline_entry_t *e = &gnb_tx_timeline[i];
 
       fprintf(txf,
-              "%" PRIu64 ",%" PRIu64 ","
-              "%d,%d,%d,%d\n",
-              e->sched_start_ns,
-              e->sched_end_ns,
-              e->frame_tx,
-              e->slot_tx,
-              e->frame_rx,
-              e->slot_rx);
-    }
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%d,%d,%d,"
+        "%d,%d,%d,%d\n",
+        e->sched_start_ns,
+        e->sched_lock_acquired_ns,
+        e->sched_end_ns,
+        e->ul_collect_count,
+        e->ul_first_target_slot,
+        e->ul_first_k2,
+        e->frame_tx,
+        e->slot_tx,
+        e->frame_rx,
+        e->slot_rx);
+      }
 
     fclose(txf);
     fprintf(stderr, "gNB timeline: wrote %u TX entries to %s\n",
@@ -275,13 +292,27 @@ static void tx_func(processingData_L1tx_t *info)
 
   uint64_t sched_start_ns = gnb_timeline_now_ns();
 
+  /* Reset before entering the scheduler.
+  * gNB_dlsch_ulsch_scheduler() will set this immediately after
+  * acquiring sched_lock. */
+  gnb_sched_lock_acquired_ns_tls = 0;
+
+  gnb_ul_collect_count_tls = 0;
+  gnb_ul_first_target_slot_tls = -1;
+  gnb_ul_first_k2_tls = -1;
+
   ifi->NR_slot_indication(&ind, &sched_response);
 
   uint64_t sched_end_ns = gnb_timeline_now_ns();
 
   if (tx_trace != NULL) {
     tx_trace->sched_start_ns = sched_start_ns;
+    tx_trace->sched_lock_acquired_ns = gnb_sched_lock_acquired_ns_tls;
     tx_trace->sched_end_ns = sched_end_ns;
+
+    tx_trace->ul_collect_count = gnb_ul_collect_count_tls;
+    tx_trace->ul_first_target_slot = gnb_ul_first_target_slot_tls;
+    tx_trace->ul_first_k2 = gnb_ul_first_k2_tls;
   }
 
   stop_meas(&gNB->slot_indication_stats);

@@ -16,6 +16,10 @@
 #include "openair3/NRPPA/nrppa_gNB_config.h"
 #include "openair2/F1AP/lib/f1ap_positioning.h"
 
+extern _Thread_local int gnb_ul_collect_count_tls;
+extern _Thread_local int gnb_ul_first_target_slot_tls;
+extern _Thread_local int gnb_ul_first_k2_tls;
+
 static const uint16_t NR_TRANSFORM_PRECODE_RB_LUT[274] = {
     0,   1,   2,   3,   4,   5,   6,   6,   8,   9,   10,  10,  12,  12,  12,  15,  16,  16,  18,  18,  20,  20,  20,  20,  24,
     25,  25,  27,  27,  27,  30,  30,  32,  32,  32,  32,  36,  36,  36,  36,  40,  40,  40,  40,  40,  45,  45,  45,  48,  48,
@@ -2813,15 +2817,25 @@ void nr_ulsch_preprocessor(gNB_MAC_INST *nr_mac, post_process_pusch_t *pp_pusch)
      * HARQ processes, bumps sched_ul_bytes) so a stale snapshot would cause
      * double-grants and retx on already-dispatched HARQ PIDs. */
     nr_ul_candidate_t candidates[MAX_MOBILES_PER_GNB] = {0};
+
+    /* Instrumentation: record that this scheduler invocation
+    * actually reached UL HARQ candidate collection. */
+    if (gnb_ul_collect_count_tls == 0) {
+      gnb_ul_first_target_slot_tls = sched_slot;
+      gnb_ul_first_k2_tls = k2;
+    }
+
+    gnb_ul_collect_count_tls++;
+
     int n_cand = collect_ul_candidates(nr_mac,
-                                       nr_mac->UE_info.connected_ue_list,
-                                       candidates,
-                                       MAX_MOBILES_PER_GNB,
-                                       frame,
-                                       slot,
-                                       k2,
-                                       sched_frame,
-                                       sched_slot);
+                                      nr_mac->UE_info.connected_ue_list,
+                                      candidates,
+                                      MAX_MOBILES_PER_GNB,
+                                      frame,
+                                      slot,
+                                      k2,
+                                      sched_frame,
+                                      sched_slot);
     if (n_cand == 0 && !last_dl)
       break;
 
