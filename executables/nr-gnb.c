@@ -19,6 +19,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 #include "common/utils/LOG/log.h"
 #include "common/utils/system.h"
 #include "PHY/NR_ESTIMATION/nr_ul_estimation.h"
@@ -45,6 +46,7 @@
 #include "thread-pool.h"
 #include "time_meas.h"
 #include "utils.h"
+
 
 #define TICK_TO_US(ts) (ts.trials==0?0:ts.diff/ts.trials)
 #define L1STATSSTRLEN 16384
@@ -76,7 +78,9 @@ typedef struct {
   uint64_t rx_func_start_ns;
 
   uint64_t phy_start_ns;
-  uint64_t phy_end_ns;
+  uint64_t phy_end_ns;              /* native PHY completion */
+  uint64_t phy_release_target_ns;   /* requested absolute release time */
+  uint64_t phy_release_ns;          /* actual release time */
 
   uint64_t ul_ind_start_ns;
   uint64_t ul_ind_end_ns;
@@ -95,6 +99,7 @@ static uint64_t gnb_start_realtime_ns = 0;
 
 static uint64_t gnb_end_mono_ns = 0;
 static uint64_t gnb_end_realtime_ns = 0;
+static uint64_t gnb_phy_release_target_ns = 0;
 
 static _Atomic uint32_t gnb_tx_timeline_count = 0;
 static _Atomic uint32_t gnb_rx_timeline_count = 0;
@@ -107,6 +112,60 @@ static inline uint64_t gnb_timeline_now_ns(void)
 
   return ((uint64_t)ts.tv_sec * 1000000000ULL)
        + (uint64_t)ts.tv_nsec;
+}
+
+static void gnb_init_phy_release_target(void)
+{
+  //helper function to read the environment variable GNB_PHY_RELEASE_TARGET_US and set gnb_phy_release_target_ns accordingly
+  const char *env = getenv("GNB_PHY_RELEASE_TARGET_US");
+
+  if (env == NULL || env[0] == '\0') {
+    gnb_phy_release_target_ns = 0;
+    fprintf(stderr,
+            "gNB PHY release delay: disabled "
+            "(GNB_PHY_RELEASE_TARGET_US not set)\n");
+    return;
+  }
+
+  errno = 0;
+  char *end = NULL;
+  unsigned long long target_us = strtoull(env, &end, 10);
+
+  AssertFatal(errno == 0 &&
+              end != env &&
+              *end == '\0',
+              "Invalid GNB_PHY_RELEASE_TARGET_US='%s'\n",
+              env);
+
+  AssertFatal(target_us <= UINT64_MAX / 1000ULL,
+              "GNB_PHY_RELEASE_TARGET_US too large\n");
+
+  gnb_phy_release_target_ns = (uint64_t)target_us * 1000ULL;
+
+  fprintf(stderr,
+          "gNB PHY release target: %llu us\n",
+          target_us);
+}
+
+static void gnb_wait_until_raw_ns(uint64_t target_ns)
+{
+  while (1) {
+    uint64_t now_ns = gnb_timeline_now_ns();
+
+    if (now_ns >= target_ns)
+      return;
+
+    uint64_t remaining_ns = target_ns - now_ns;
+
+    struct timespec req = {
+      .tv_sec = remaining_ns / 1000000000ULL,
+      .tv_nsec = remaining_ns % 1000000000ULL
+    };
+
+    while (nanosleep(&req, &req) == -1 && errno == EINTR) {
+      /* Continue sleeping for the remaining interval. */
+    }
+  }
 }
 
 static inline uint64_t gnb_realtime_now_ns(void)
@@ -178,11 +237,12 @@ static void gnb_timeline_dump(void)
   FILE *rxf = fopen(rx_path, "w");
   if (rxf != NULL) {
     fprintf(rxf,
-            "rx_func_start_ns,"
-            "phy_start_ns,phy_end_ns,"
-            "ul_ind_start_ns,ul_ind_end_ns,"
-            "l1_complete_ns,"
-            "frame_rx,slot_rx\n");
+        "rx_func_start_ns,"
+        "phy_start_ns,phy_end_ns,"
+        "phy_release_target_ns,phy_release_ns,"
+        "ul_ind_start_ns,ul_ind_end_ns,"
+        "l1_complete_ns,"
+        "frame_rx,slot_rx\n");
 
     uint32_t n_rx = atomic_load(&gnb_rx_timeline_count);
     if (n_rx > GNB_TIMELINE_MAX)
@@ -192,19 +252,22 @@ static void gnb_timeline_dump(void)
       const gnb_rx_timeline_entry_t *e = &gnb_rx_timeline[i];
 
       fprintf(rxf,
-              "%" PRIu64 ","
-              "%" PRIu64 ",%" PRIu64 ","
-              "%" PRIu64 ",%" PRIu64 ","
-              "%" PRIu64 ","
-              "%d,%d\n",
-              e->rx_func_start_ns,
-              e->phy_start_ns,
-              e->phy_end_ns,
-              e->ul_ind_start_ns,
-              e->ul_ind_end_ns,
-              e->l1_complete_ns,
-              e->frame_rx,
-              e->slot_rx);
+        "%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ","
+        "%d,%d\n",
+        e->rx_func_start_ns,
+        e->phy_start_ns,
+        e->phy_end_ns,
+        e->phy_release_target_ns,
+        e->phy_release_ns,
+        e->ul_ind_start_ns,
+        e->ul_ind_end_ns,
+        e->l1_complete_ns,
+        e->frame_rx,
+        e->slot_rx);
     }
 
     fclose(rxf);
@@ -442,11 +505,38 @@ static void rx_func(processingData_L1_t *info)
 
     phy_procedures_gNB_uespec_RX(gNB, frame_rx, slot_rx, &UL_INFO);
 
+    /* Native PHY completion: no artificial delay included. */
     uint64_t phy_end_ns = gnb_timeline_now_ns();
+
+    /* Controlled PHY-result release.
+    *
+    * GNB_PHY_RELEASE_TARGET_US defines a minimum PHY latency measured
+    * from phy_start_ns. For example, with a 1500 us target:
+    *
+    *   native PHY = 900 us  -> wait about 600 us
+    *   native PHY = 1700 us -> no wait
+    *
+    * Therefore:
+    *
+    *   effective latency = max(native latency, requested target)
+    */
+    uint64_t phy_release_target_ns = 0;
+
+    if (gnb_phy_release_target_ns > 0) {
+      phy_release_target_ns = phy_start_ns + gnb_phy_release_target_ns;
+
+      if (phy_end_ns < phy_release_target_ns)
+        gnb_wait_until_raw_ns(phy_release_target_ns);
+    }
+
+    /* Actual instant at which the PHY result is allowed to proceed to MAC. */
+    uint64_t phy_release_ns = gnb_timeline_now_ns();
 
     if (rx_trace != NULL) {
       rx_trace->phy_start_ns = phy_start_ns;
       rx_trace->phy_end_ns = phy_end_ns;
+      rx_trace->phy_release_target_ns = phy_release_target_ns;
+      rx_trace->phy_release_ns = phy_release_ns;
     }
 
     // Call the scheduler
@@ -573,6 +663,7 @@ void *nrL1_stats_thread(void *param) {
 
 void init_gNB_Tpool(int inst)
 {
+  gnb_init_phy_release_target();
   AssertFatal(NFAPI_MODE == NFAPI_MODE_PNF || NFAPI_MODE == NFAPI_MONOLITHIC,
               "illegal NFAPI_MODE %d (%s): it cannot have an L1\n",
               NFAPI_MODE,
@@ -581,6 +672,7 @@ void init_gNB_Tpool(int inst)
   PHY_VARS_gNB *gNB;
   gNB = RC.gNB[inst];
   gNB_L1_proc_t *proc = &gNB->proc;
+  
   // ULSCH decoding threadpool
   initTpool(get_softmodem_params()->threadPoolConfig, &gNB->threadPool, cpumeas(CPUMEAS_GETSTATE));
 
