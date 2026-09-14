@@ -28,6 +28,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <limits.h>
+#include <errno.h>
+#include <pthread.h>
 // #define DEBUG_ULSCH_DECODING
 // #define gNB_DEBUG_TRACE
 
@@ -49,8 +51,12 @@
 
 typedef struct {
   uint64_t call_start_ns;
+
   uint64_t decoder_start_ns;
-  uint64_t decoder_end_ns;
+  uint64_t decoder_end_ns;                /* native decoder completion */
+  uint64_t decoder_release_target_ns;     /* requested absolute release */
+  uint64_t decoder_release_ns;            /* effective decoder completion */
+
   uint64_t call_end_ns;
 
   uint64_t call_id;
@@ -104,6 +110,62 @@ static inline uint64_t ldpc_trace_now_ns(void)
        + (uint64_t)ts.tv_nsec;
 }
 
+static uint64_t ldpc_latency_target_ns = 0;
+static pthread_once_t ldpc_latency_init_once = PTHREAD_ONCE_INIT;
+
+static void ldpc_init_latency_target(void)
+{
+  const char *env = getenv("LDPC_LATENCY_TARGET_US");
+
+  if (env == NULL || env[0] == '\0') {
+    ldpc_latency_target_ns = 0;
+    fprintf(stderr,
+            "LDPC latency perturbation: disabled "
+            "(LDPC_LATENCY_TARGET_US not set)\n");
+    return;
+  }
+
+  errno = 0;
+  char *end = NULL;
+  unsigned long long target_us = strtoull(env, &end, 10);
+
+  AssertFatal(errno == 0 &&
+              end != env &&
+              *end == '\0',
+              "Invalid LDPC_LATENCY_TARGET_US='%s'\n",
+              env);
+
+  AssertFatal(target_us <= UINT64_MAX / 1000ULL,
+              "LDPC_LATENCY_TARGET_US too large\n");
+
+  ldpc_latency_target_ns = (uint64_t)target_us * 1000ULL;
+
+  fprintf(stderr,
+          "LDPC latency target: %llu us\n",
+          target_us);
+}
+
+static void ldpc_wait_until_raw_ns(uint64_t target_ns)
+{
+  while (1) {
+    uint64_t now_ns = ldpc_trace_now_ns();
+
+    if (now_ns >= target_ns)
+      return;
+
+    uint64_t remaining_ns = target_ns - now_ns;
+
+    struct timespec req = {
+      .tv_sec = remaining_ns / 1000000000ULL,
+      .tv_nsec = remaining_ns % 1000000000ULL
+    };
+
+    while (nanosleep(&req, &req) == -1 && errno == EINTR) {
+      /* Continue sleeping for the remaining interval. */
+    }
+  }
+}
+
 static void ldpc_trace_dump(void)
 {
   const char *path = getenv("LDPC_TRACE_FILE");
@@ -118,7 +180,8 @@ static void ldpc_trace_dump(void)
 
   fprintf(f,
           "call_id,"
-          "call_start_ns,decoder_start_ns,decoder_end_ns,call_end_ns,"
+          "call_start_ns,decoder_start_ns,decoder_end_ns,"
+          "decoder_release_target_ns,decoder_release_ns,call_end_ns,"
           "frame,slot,nb_pusch,pusch_id,ulsch_id,rnti,"
           "A,G,MCS,NPRB,Qm,BG,C,K,Zc,F,"
           "target_code_rate,R,max_ldpc_iterations,"
@@ -134,7 +197,7 @@ static void ldpc_trace_dump(void)
     ldpc_trace_entry_t *e = &ldpc_trace[i];
 
     fprintf(f,
-            "%lu,%lu,%lu,%lu,%lu,"
+            "%lu,%lu,%lu,%lu,%lu,%lu,%lu,"
             "%u,%u,%u,%u,%u,%u,"
             "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,"
             "%u,%u,%u,"
@@ -143,6 +206,8 @@ static void ldpc_trace_dump(void)
             e->call_start_ns,
             e->decoder_start_ns,
             e->decoder_end_ns,
+            e->decoder_release_target_ns,
+            e->decoder_release_ns,
             e->call_end_ns,
             e->frame,
             e->slot,
@@ -257,6 +322,7 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
                       int *ULSCH_ids,
                       int nb_pusch)
 {
+  pthread_once(&ldpc_latency_init_once, ldpc_init_latency_target);
   // START for ldpc time profile (edo)
   uint64_t trace_call_start_ns = ldpc_trace_now_ns();
 
@@ -516,9 +582,36 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
   int ret_decoder =
       phy_vars_gNB->nrLDPC_coding_interface.nrLDPC_coding_decoder(&slot_parameters);
 
+  /* Native LDPC decoder completion. */
   uint64_t trace_decoder_end_ns = ldpc_trace_now_ns();
-  for (int i = 0; i < nb_pusch; i++) {
 
+  /*
+  * Controlled LDPC completion-latency floor.
+  *
+  * Example:
+  *   native decoder = 300 us, target = 700 us
+  *       -> wait approximately 400 us
+  *
+  *   native decoder = 800 us, target = 700 us
+  *       -> no wait
+  *
+  * effective LDPC latency =
+  *     max(native LDPC latency, requested target)
+  */
+  uint64_t trace_decoder_release_target_ns = 0;
+  uint64_t trace_decoder_release_ns = trace_decoder_end_ns;
+
+  if (ldpc_latency_target_ns > 0) {
+    trace_decoder_release_target_ns =
+        trace_decoder_start_ns + ldpc_latency_target_ns;
+
+    if (trace_decoder_end_ns < trace_decoder_release_target_ns) {
+      ldpc_wait_until_raw_ns(trace_decoder_release_target_ns);
+      trace_decoder_release_ns = ldpc_trace_now_ns();
+    }
+  }
+
+  for (int i = 0; i < nb_pusch; i++) {
     uint32_t idx = trace_indices[i];
 
     if (idx != UINT32_MAX) {
@@ -527,6 +620,12 @@ int nr_ulsch_decoding(PHY_VARS_gNB *phy_vars_gNB,
 
       ldpc_trace[idx].decoder_end_ns =
           trace_decoder_end_ns;
+
+      ldpc_trace[idx].decoder_release_target_ns =
+          trace_decoder_release_target_ns;
+
+      ldpc_trace[idx].decoder_release_ns =
+          trace_decoder_release_ns;
     }
   }
   // END edo for ldpc profiling
