@@ -7,6 +7,15 @@
  */
 
 
+
+/* EDO: low-overhead MAC grant tracing */
+#include <inttypes.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
 #include "LAYER2/NR_MAC_gNB/mac_proto.h"
 #include "executables/softmodem-common.h"
 #include "common/utils/nr/nr_common.h"
@@ -2397,6 +2406,106 @@ nfapi_nr_pusch_pdu_t *prepare_pusch_pdu(nfapi_nr_ul_tti_request_t *future_ul_tti
   return pusch_pdu;
 }
 
+
+/* ============================================================
+ * EDO MAC GRANT TRACE
+ *
+ * One record per completed connected-UE UL grant.
+ * Records are buffered in RAM and exported at normal exit.
+ * ============================================================ */
+
+#define EDO_GRANT_TRACE_MAX 300000
+
+typedef struct {
+  uint64_t grant_ready_ns;
+
+  int sched_frame, sched_slot;
+  int target_frame, target_slot;
+
+  int rnti;
+  int harq_pid, harq_round, rv, ndi;
+
+  int mcs, tbs_bytes;
+  int rb_start, rb_size;
+  int qm, target_code_rate, k2;
+
+  int start_symbol, n_symbols, n_layers, bg;
+} edo_grant_trace_entry_t;
+
+static edo_grant_trace_entry_t edo_grant_trace[EDO_GRANT_TRACE_MAX];
+static _Atomic uint32_t edo_grant_trace_count = 0;
+
+static void edo_grant_trace_dump(void)
+{
+  /* Do not let an empty process overwrite a valid grant trace.
+   * OAI may have multiple processes sharing the same trace path. */
+  if (atomic_load(&edo_grant_trace_count) == 0)
+    return;
+
+  const char *prefix = getenv("GNB_TIMELINE_PREFIX");
+  if (!prefix || !prefix[0])
+    prefix = "/tmp/gnb_timeline";
+
+  char path[512];
+  snprintf(path, sizeof(path), "%s_grants.csv", prefix);
+
+  FILE *f = fopen(path, "w");
+  if (!f) {
+    fprintf(stderr, "Grant trace: cannot open %s\n", path);
+    return;
+  }
+
+  fprintf(f,
+    "grant_ready_ns,"
+    "sched_frame,sched_slot,target_frame,target_slot,"
+    "rnti,harq_pid,harq_round,rv,ndi,"
+    "mcs,tbs_bytes,rb_start,rb_size,qm,target_code_rate,k2,"
+    "start_symbol,n_symbols,n_layers,bg\n");
+
+  uint32_t total = atomic_load(&edo_grant_trace_count);
+  uint32_t kept = total < EDO_GRANT_TRACE_MAX
+                    ? total : EDO_GRANT_TRACE_MAX;
+
+  for (uint32_t i = 0; i < kept; i++) {
+    const edo_grant_trace_entry_t *e = &edo_grant_trace[i];
+
+    fprintf(f, "%" PRIu64, e->grant_ready_ns);
+
+    fprintf(f, ",%d,%d,%d,%d",
+      e->sched_frame, e->sched_slot,
+      e->target_frame, e->target_slot);
+
+    fprintf(f, ",%d,%d,%d,%d,%d",
+      e->rnti, e->harq_pid, e->harq_round,
+      e->rv, e->ndi);
+
+    fprintf(f, ",%d,%d,%d,%d,%d,%d,%d",
+      e->mcs, e->tbs_bytes, e->rb_start,
+      e->rb_size, e->qm, e->target_code_rate,
+      e->k2);
+
+    fprintf(f, ",%d,%d,%d,%d\n",
+      e->start_symbol, e->n_symbols,
+      e->n_layers, e->bg);
+  }
+
+  fclose(f);
+
+  fprintf(stderr,
+    "Grant trace: wrote %u entries to %s (dropped %u)\n",
+    kept, path, total - kept);
+}
+
+/* Register at process initialization, not in the scheduler. */
+static void edo_grant_trace_register(void)
+  __attribute__((constructor));
+
+static void edo_grant_trace_register(void)
+{
+  atexit(edo_grant_trace_dump);
+}
+
+
 void post_process_ulsch(gNB_MAC_INST *nr_mac,
                         post_process_pusch_t *pusch,
                         NR_UE_info_t *UE,
@@ -2612,6 +2721,51 @@ void post_process_ulsch(gNB_MAC_INST *nr_mac,
                      coreset,
                      UE->pdsch_HARQ_ACK_Codebook,
                      nr_mac->cset0_bwp_size);
+
+
+  /* EDO: record completed UL grant, without file I/O. */
+  {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+
+    const uint64_t ready_ns =
+        (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+
+    uint32_t idx = atomic_fetch_add_explicit(
+        &edo_grant_trace_count, 1, memory_order_relaxed);
+
+    if (idx < EDO_GRANT_TRACE_MAX) {
+      edo_grant_trace_entry_t *e = &edo_grant_trace[idx];
+
+      *e = (edo_grant_trace_entry_t) {
+        .grant_ready_ns = ready_ns,
+
+        .sched_frame = frame,
+        .sched_slot = slot,
+        .target_frame = sched_pusch->frame,
+        .target_slot = sched_pusch->slot,
+
+        .rnti = UE->rnti,
+        .harq_pid = harq_id,
+        .harq_round = cur_harq->round,
+        .rv = pusch_pdu->pusch_data.rv_index,
+        .ndi = cur_harq->ndi,
+
+        .mcs = pusch_pdu->mcs_index,
+        .tbs_bytes = pusch_pdu->pusch_data.tb_size,
+        .rb_start = pusch_pdu->rb_start,
+        .rb_size = pusch_pdu->rb_size,
+        .qm = pusch_pdu->qam_mod_order,
+        .target_code_rate = pusch_pdu->target_code_rate,
+        .k2 = sched_pusch->tda_info.k2,
+
+        .start_symbol = pusch_pdu->start_symbol_index,
+        .n_symbols = pusch_pdu->nr_of_symbols,
+        .n_layers = pusch_pdu->nrOfLayers,
+        .bg = pusch_pdu->maintenance_parms_v3.ldpcBaseGraph
+      };
+    }
+  }
 
 }
 
